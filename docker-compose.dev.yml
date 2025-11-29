@@ -1,0 +1,56 @@
+version: '3.8'
+
+# Development Docker Compose
+# Use: docker-compose -f docker-compose.dev.yml up
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: qahub-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: qahub
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qahub -d qahub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - qahub-dev-network
+
+  # Redis (Optional - for caching and queues)
+  redis:
+    image: redis:7-alpine
+    container_name: qahub-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - qahub-dev-network
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+
+networks:
+  qahub-dev-network:
+    driver: bridge
+

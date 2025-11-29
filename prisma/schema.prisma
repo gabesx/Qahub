@@ -1,0 +1,732 @@
+// QaHub Database Schema
+// Test Management System with Document Management and Analytics
+// Database: PostgreSQL
+// ORM: Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// MULTI-TENANCY
+// ========================================
+
+enum TenantStatus {
+  active
+  suspended
+  cancelled
+  trial
+}
+
+enum TenantPlan {
+  free
+  starter
+  professional
+  enterprise
+}
+
+model Tenant {
+  id             BigInt       @id @default(autoincrement()) @db.BigInt
+  name           String       @unique @db.VarChar(255)
+  slug           String       @unique @db.VarChar(255)
+  domain         String?      @unique @map("domain") @db.VarChar(255)
+  subdomain      String?      @unique @map("subdomain") @db.VarChar(255)
+  plan           TenantPlan   @default(free)
+  status         TenantStatus @default(active)
+  maxUsers       Int          @default(5) @map("max_users") @db.Integer
+  maxProjects    Int          @default(3) @map("max_projects") @db.Integer
+  features       Json?        @map("features")
+  billingEmail   String?      @map("billing_email") @db.VarChar(255)
+  subscriptionId String?      @map("subscription_id") @db.VarChar(255)
+  trialEndsAt    DateTime?    @map("trial_ends_at") @db.Timestamp
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamp
+
+  tenantUsers  TenantUser[]
+  projects     Project[]
+  repositories Repository[]
+  testCases    TestCase[]
+  documents    Document[]
+
+  @@index([slug])
+  @@index([domain])
+  @@index([subdomain])
+  @@index([plan, status])
+  @@index([status])
+  @@map("tenants")
+}
+
+model TenantUser {
+  tenantId  BigInt   @map("tenant_id") @db.BigInt
+  userId    BigInt   @map("user_id") @db.BigInt
+  role      String   @default("member") @db.VarChar(50)
+  invitedBy BigInt?  @map("invited_by") @db.BigInt
+  joinedAt  DateTime @default(now()) @map("joined_at") @db.Timestamp
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, userId])
+  @@index([userId, tenantId])
+  @@index([tenantId, role])
+  @@index([userId])
+  @@map("tenant_users")
+}
+
+// ========================================
+// USER MANAGEMENT & AUTHENTICATION
+// ========================================
+
+model User {
+  id                BigInt    @id @default(autoincrement()) @db.BigInt
+  name              String    @db.VarChar(255)
+  email             String    @unique @db.VarChar(100)
+  googleId          String?   @unique @map("google_id") @db.VarChar(255)
+  googleAvatar      String?   @map("google_avatar") @db.VarChar(500)
+  authProvider      String    @default("email") @map("auth_provider") @db.VarChar(50)
+  role              String?   @db.VarChar(50)
+  avatar            String?   @db.VarChar(500)
+  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamp
+  passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamp
+  isActive          Boolean   @default(true) @map("is_active")
+  emailVerifiedAt   DateTime? @map("email_verified_at") @db.Timestamp
+  password          String    @db.VarChar(255)
+  jobRole           String?   @map("job_role") @db.VarChar(100)
+  rememberToken     String?   @map("remember_token") @db.VarChar(100)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  tenantUsers          TenantUser[]
+  passwordResets       PasswordReset[]
+  personalAccessTokens PersonalAccessToken[]
+  passwordHistory      PasswordHistory[]
+  userRoles            UserRole[]
+  userPermissions      UserPermission[]
+  createdProjects      Project[]             @relation("ProjectCreator")
+  updatedProjects      Project[]             @relation("ProjectUpdater")
+
+  @@index([email])
+  @@index([googleId])
+  @@map("users")
+}
+
+model PasswordReset {
+  email     String    @db.VarChar(255)
+  userId    BigInt?   @map("user_id") @db.BigInt
+  token     String    @unique @db.VarChar(255)
+  usedAt    DateTime? @map("used_at") @db.Timestamp
+  expiresAt DateTime? @map("expires_at") @db.Timestamp
+  createdAt DateTime? @map("created_at") @db.Timestamp
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([userId])
+  @@index([token])
+  @@index([createdAt])
+  @@index([expiresAt, usedAt])
+  @@index([userId, createdAt])
+  @@index([usedAt])
+  @@map("password_resets")
+}
+
+model PersonalAccessToken {
+  id                BigInt    @id @default(autoincrement()) @db.BigInt
+  tokenableType     String    @map("tokenable_type") @db.VarChar(255)
+  tokenableId       BigInt    @map("tokenable_id") @db.BigInt
+  name              String    @db.VarChar(255)
+  token             String    @unique @db.VarChar(64)
+  tokenHash         String?   @unique @map("token_hash") @db.VarChar(64)
+  abilities         String?   @db.Text
+  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamp
+  lastUsedIp        String?   @map("last_used_ip") @db.VarChar(45)
+  lastUsedUserAgent String?   @map("last_used_user_agent") @db.VarChar(500)
+  expiresAt         DateTime? @map("expires_at") @db.Timestamp
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamp
+  revokedBy         BigInt?   @map("revoked_by") @db.BigInt
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  user User? @relation(fields: [tokenableId], references: [id], onDelete: SetNull)
+
+  @@index([tokenableType, tokenableId, revokedAt])
+  @@index([tokenHash])
+  @@index([expiresAt, revokedAt])
+  @@map("personal_access_tokens")
+}
+
+model PasswordHistory {
+  id              BigInt   @id @default(autoincrement()) @db.BigInt
+  userId          BigInt   @map("user_id") @db.BigInt
+  passwordHash    String   @map("password_hash") @db.VarChar(255)
+  passwordResetId BigInt?  @map("password_reset_id") @db.BigInt
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([passwordResetId])
+  @@map("password_history")
+}
+
+// ========================================
+// AUTHORIZATION & PERMISSIONS
+// ========================================
+
+model Permission {
+  id        BigInt   @id @default(autoincrement()) @db.BigInt
+  name      String   @db.VarChar(255)
+  guardName String   @map("guard_name") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  userPermissions UserPermission[]
+  rolePermissions RolePermission[]
+
+  @@unique([name, guardName])
+  @@map("permissions")
+}
+
+model Role {
+  id        BigInt   @id @default(autoincrement()) @db.BigInt
+  name      String   @db.VarChar(255)
+  guardName String   @map("guard_name") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([name, guardName])
+  @@map("roles")
+}
+
+model UserRole {
+  userId    BigInt   @map("user_id") @db.BigInt
+  roleId    BigInt   @map("role_id") @db.BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model UserPermission {
+  userId       BigInt   @map("user_id") @db.BigInt
+  permissionId BigInt   @map("permission_id") @db.BigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([userId])
+  @@index([permissionId])
+  @@map("user_permissions")
+}
+
+model RolePermission {
+  permissionId BigInt   @map("permission_id") @db.BigInt
+  roleId       BigInt   @map("role_id") @db.BigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([permissionId, roleId])
+  @@map("role_has_permissions")
+}
+
+// ========================================
+// PROJECTS & REPOSITORIES
+// ========================================
+
+model Project {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  tenantId    BigInt   @map("tenant_id") @db.BigInt
+  title       String   @db.VarChar(255)
+  description String?  @db.VarChar(500)
+  createdBy   BigInt?  @map("created_by") @db.BigInt
+  updatedBy   BigInt?  @map("updated_by") @db.BigInt
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator      User?        @relation("ProjectCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater      User?        @relation("ProjectUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+  repositories Repository[]
+  testPlans    TestPlan[]
+  testRuns     TestRun[]
+  documents    Document[]
+
+  @@index([tenantId, id])
+  @@index([tenantId, createdAt])
+  @@index([createdAt])
+  @@index([createdBy])
+  @@index([title])
+  @@map("projects")
+}
+
+model Repository {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  tenantId    BigInt   @map("tenant_id") @db.BigInt
+  projectId   BigInt   @map("project_id") @db.BigInt
+  title       String   @db.VarChar(255)
+  prefix      String   @db.VarChar(50)
+  description String?  @db.Text
+  createdBy   BigInt?  @map("created_by") @db.BigInt
+  updatedBy   BigInt?  @map("updated_by") @db.BigInt
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  suites    Suite[]
+  testPlans TestPlan[]
+  testRuns  TestRun[]
+
+  @@index([tenantId, id])
+  @@index([tenantId, projectId])
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([createdBy])
+  @@index([title])
+  @@map("repositories")
+}
+
+model Setting {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  key         String   @unique @db.VarChar(255)
+  value       String?  @db.Text
+  type        String   @default("string") @db.VarChar(50)
+  category    String?  @db.VarChar(100)
+  description String?  @db.Text
+  createdBy   BigInt?  @map("created_by") @db.BigInt
+  updatedBy   BigInt?  @map("updated_by") @db.BigInt
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  @@index([category])
+  @@index([type, category])
+  @@index([createdBy])
+  @@map("settings")
+}
+
+// ========================================
+// TEST PLANNING & ORGANIZATION
+// ========================================
+
+model Suite {
+  id           BigInt   @id @default(autoincrement()) @db.BigInt
+  repositoryId BigInt   @map("repository_id") @db.BigInt
+  parentId     BigInt?  @map("parent_id") @db.BigInt
+  title        String   @db.VarChar(255)
+  order        Int?     @db.Integer
+  createdBy    BigInt?  @map("created_by") @db.BigInt
+  updatedBy    BigInt?  @map("updated_by") @db.BigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  parent     Suite?     @relation("SuiteHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Suite[]    @relation("SuiteHierarchy")
+  testCases  TestCase[]
+
+  @@index([repositoryId])
+  @@index([parentId])
+  @@index([repositoryId, parentId])
+  @@index([createdBy])
+  @@index([repositoryId, order])
+  @@map("suites")
+}
+
+enum TestCaseDefectStage {
+  pre_development
+  development
+  post_development
+  release_production
+}
+
+model TestCase {
+  id             BigInt               @id @default(autoincrement()) @db.BigInt
+  tenantId       BigInt               @map("tenant_id") @db.BigInt
+  suiteId        BigInt               @map("suite_id") @db.BigInt
+  title          String               @db.VarChar(255)
+  description    String?              @db.Text
+  labels         String?              @db.VarChar(255)
+  automated      Boolean              @default(false)
+  priority       Int                  @default(2) @db.Integer
+  data           Json?                @db.Json
+  order          Int?                 @db.Integer
+  regression     Boolean              @default(true)
+  epicLink       String?              @map("epic_link") @db.VarChar(255)
+  linkedIssue    String?              @map("linked_issue") @db.VarChar(255)
+  jiraKey        String?              @map("jira_key") @db.VarChar(45)
+  platform       String?              @db.Text
+  releaseVersion String?              @map("release_version") @db.VarChar(100)
+  severity       String               @default("Moderate") @db.VarChar(45)
+  defectStage    TestCaseDefectStage? @map("defect_stage")
+  version        Int                  @default(1) @db.Integer
+  createdBy      BigInt?              @map("created_by") @db.BigInt
+  updatedBy      BigInt?              @map("updated_by") @db.BigInt
+  deletedBy      BigInt?              @map("deleted_by") @db.BigInt
+  deletedAt      DateTime?            @map("deleted_at") @db.Timestamp
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamp
+
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  suite          Suite               @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  comments       TestCaseComment[]
+  testPlanCases  TestPlanTestCase[]
+  testRunResults TestRunResult[]
+  attachments    TestRunAttachment[]
+
+  @@index([tenantId, id])
+  @@index([tenantId, suiteId])
+  @@index([suiteId])
+  @@index([jiraKey])
+  @@index([automated, priority])
+  @@index([createdBy, createdAt])
+  @@index([deletedAt])
+  @@index([defectStage])
+  @@index([automated, defectStage])
+  @@map("test_cases")
+}
+
+model TestPlan {
+  id           BigInt   @id @default(autoincrement()) @db.BigInt
+  projectId    BigInt   @map("project_id") @db.BigInt
+  repositoryId BigInt   @map("repository_id") @db.BigInt
+  title        String   @db.VarChar(255)
+  description  String?  @db.Text
+  status       String   @default("draft") @db.VarChar(50)
+  data         String?  @db.Text
+  createdBy    BigInt?  @map("created_by") @db.BigInt
+  updatedBy    BigInt?  @map("updated_by") @db.BigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  project       Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository    Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  testPlanCases TestPlanTestCase[]
+  testRuns      TestRun[]
+  comments      TestRunComment[]
+
+  @@index([projectId, repositoryId])
+  @@index([projectId, repositoryId, status])
+  @@index([createdBy])
+  @@index([title])
+  @@index([status])
+  @@map("test_plans")
+}
+
+model TestPlanTestCase {
+  testPlanId BigInt   @map("test_plan_id") @db.BigInt
+  testCaseId BigInt   @map("test_case_id") @db.BigInt
+  order      Int      @default(0) @db.Integer
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  testPlan TestPlan @relation(fields: [testPlanId], references: [id], onDelete: Cascade)
+  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@id([testPlanId, testCaseId])
+  @@index([testPlanId, order])
+  @@index([testCaseId])
+  @@map("test_plan_test_cases")
+}
+
+model TestCaseComment {
+  id         BigInt    @id @default(autoincrement()) @db.BigInt
+  testCaseId BigInt    @map("test_case_id") @db.BigInt
+  userId     BigInt    @map("user_id") @db.BigInt
+  parentId   BigInt?   @map("parent_id") @db.BigInt
+  content    String    @db.Text
+  isResolved Boolean   @default(false) @map("is_resolved")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamp
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamp
+
+  testCase TestCase          @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  parent   TestCaseComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  TestCaseComment[] @relation("CommentReplies")
+
+  @@index([testCaseId])
+  @@index([userId])
+  @@index([parentId])
+  @@index([createdAt])
+  @@index([testCaseId, isResolved, createdAt])
+  @@map("test_case_comments")
+}
+
+// ========================================
+// TEST EXECUTION & RESULTS
+// ========================================
+
+enum TestRunStatus {
+  pending
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum TestRunResultStatus {
+  passed
+  failed
+  skipped
+  blocked
+}
+
+model TestRun {
+  id            BigInt        @id @default(autoincrement()) @db.BigInt
+  testPlanId    BigInt        @map("test_plan_id") @db.BigInt
+  projectId     BigInt        @map("project_id") @db.BigInt
+  repositoryId  BigInt?       @map("repository_id") @db.BigInt
+  title         String        @db.VarChar(255)
+  status        TestRunStatus @default(pending)
+  executionDate DateTime?     @map("execution_date") @db.Date
+  startedAt     DateTime?     @map("started_at") @db.Timestamp
+  completedAt   DateTime?     @map("completed_at") @db.Timestamp
+  environment   String?       @db.VarChar(100)
+  buildVersion  String?       @map("build_version") @db.VarChar(100)
+  data          String?       @db.Text
+  createdBy     BigInt?       @map("created_by") @db.BigInt
+  updatedBy     BigInt?       @map("updated_by") @db.BigInt
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamp
+
+  testPlan    TestPlan            @relation(fields: [testPlanId], references: [id], onDelete: Cascade)
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository  Repository?         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  results     TestRunResult[]
+  attachments TestRunAttachment[]
+  comments    TestRunComment[]
+
+  @@index([projectId, createdAt])
+  @@index([testPlanId, createdAt])
+  @@index([repositoryId, createdAt])
+  @@index([createdBy, createdAt])
+  @@index([title])
+  @@index([status, executionDate])
+  @@index([executionDate])
+  @@index([status, startedAt])
+  @@index([environment, executionDate])
+  @@map("test_runs")
+}
+
+model TestRunResult {
+  id                 BigInt               @id @default(autoincrement()) @db.BigInt
+  testRunId          BigInt               @map("test_run_id") @db.BigInt
+  testCaseId         BigInt               @map("test_case_id") @db.BigInt
+  status             TestRunResultStatus
+  executionTime      Int?                 @map("execution_time") @db.Integer
+  errorMessage       String?              @map("error_message") @db.Text
+  stackTrace         String?              @map("stack_trace") @db.Text
+  screenshots        Json?                @map("screenshots")
+  logs               String?              @db.Text
+  defectFoundAtStage TestCaseDefectStage? @map("defect_found_at_stage")
+  bugBudgetId        BigInt?              @map("bug_budget_id") @db.BigInt
+  defectSeverity     String?              @map("defect_severity") @db.VarChar(50)
+  executedBy         BigInt?              @map("executed_by") @db.BigInt
+  executedAt         DateTime?            @map("executed_at") @db.Timestamp
+  retryCount         Int                  @default(0) @map("retry_count") @db.Integer
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamp
+
+  testRun  TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@unique([testRunId, testCaseId])
+  @@index([testRunId, status])
+  @@index([testCaseId, status])
+  @@index([executedBy, executedAt])
+  @@index([testRunId, executedAt])
+  @@index([status, executedAt])
+  @@index([defectFoundAtStage, executedAt])
+  @@index([bugBudgetId])
+  @@index([status, defectFoundAtStage])
+  @@map("test_run_results")
+}
+
+model TestRunAttachment {
+  id         BigInt   @id @default(autoincrement()) @db.BigInt
+  url        String   @db.VarChar(500)
+  testRunId  BigInt   @map("test_run_id") @db.BigInt
+  testCaseId BigInt   @map("test_case_id") @db.BigInt
+  uploadedBy BigInt?  @map("uploaded_by") @db.BigInt
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
+
+  testRun  TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@index([testRunId])
+  @@index([testCaseId])
+  @@index([testRunId, testCaseId])
+  @@index([uploadedBy])
+  @@map("test_runs_attachments")
+}
+
+model TestRunComment {
+  id         BigInt   @id @default(autoincrement()) @db.BigInt
+  userId     BigInt   @map("user_id") @db.BigInt
+  comments   String   @db.Text
+  testRunId  BigInt   @map("test_run_id") @db.BigInt
+  testPlanId BigInt   @map("test_plan_id") @db.BigInt
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  testRun  TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  testPlan TestPlan @relation(fields: [testPlanId], references: [id], onDelete: Cascade)
+
+  @@index([testRunId, createdAt])
+  @@index([testPlanId, createdAt])
+  @@index([userId, createdAt])
+  @@map("test_runs_comments")
+}
+
+// ========================================
+// DOCUMENT MANAGEMENT
+// ========================================
+
+model Document {
+  id           BigInt    @id @default(autoincrement()) @db.BigInt
+  tenantId     BigInt    @map("tenant_id") @db.BigInt
+  projectId    BigInt    @map("project_id") @db.BigInt
+  parentId     BigInt?   @map("parent_id") @db.BigInt
+  title        String    @db.VarChar(255)
+  content      String?   @db.Text
+  contentId    BigInt?   @map("content_id") @db.BigInt
+  version      Int       @default(1) @db.Integer
+  createdBy    BigInt?   @map("created_by") @db.BigInt
+  lastEditedBy BigInt?   @map("last_edited_by") @db.BigInt
+  deletedBy    BigInt?   @map("deleted_by") @db.BigInt
+  viewsCount   Int       @default(0) @map("views_count") @db.Integer
+  likesCount   Int       @default(0) @map("likes_count") @db.Integer
+  starsCount   Int       @default(0) @map("stars_count") @db.Integer
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamp
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project        Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent         Document?            @relation("DocumentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children       Document[]           @relation("DocumentHierarchy")
+  versions       DocumentVersion[]
+  comments       DocumentComment[]
+  engagements    DocumentEngagement[]
+  contentStorage ContentStorage?      @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, id])
+  @@index([tenantId, projectId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([parentId])
+  @@index([deletedAt])
+  @@index([contentId])
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id            BigInt   @id @default(autoincrement()) @db.BigInt
+  documentId    BigInt   @map("document_id") @db.BigInt
+  title         String   @db.VarChar(255)
+  content       String   @db.Text
+  versionNumber Int      @map("version_number") @db.Integer
+  createdBy     BigInt?  @map("created_by") @db.BigInt
+  changeSummary String?  @map("change_summary") @db.Text
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([versionNumber])
+  @@index([createdAt])
+  @@map("document_versions")
+}
+
+enum DocumentEngagementType {
+  like
+  star
+  view
+}
+
+model DocumentEngagement {
+  id             BigInt                 @id @default(autoincrement()) @db.BigInt
+  documentId     BigInt                 @map("document_id") @db.BigInt
+  userId         BigInt                 @map("user_id") @db.BigInt
+  engagementType DocumentEngagementType @map("engagement_type")
+  viewedAt       DateTime?              @map("viewed_at") @db.Timestamp
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamp
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId, engagementType])
+  @@index([documentId])
+  @@index([userId])
+  @@index([engagementType])
+  @@index([viewedAt])
+  @@map("document_engagements")
+}
+
+model DocumentComment {
+  id                BigInt    @id @default(autoincrement()) @db.BigInt
+  documentId        BigInt?   @map("document_id") @db.BigInt
+  documentManagerId BigInt?   @map("document_manager_id") @db.BigInt
+  userId            BigInt    @map("user_id") @db.BigInt
+  parentId          BigInt?   @map("parent_id") @db.BigInt
+  content           String    @db.Text
+  commentType       String    @default("general") @map("comment_type") @db.VarChar(50)
+  isResolved        Boolean   @default(false) @map("is_resolved")
+  mentionedUserIds  Json?     @map("mentioned_user_ids")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamp
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamp
+
+  document Document?         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  parent   DocumentComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  DocumentComment[] @relation("CommentReplies")
+
+  @@index([documentId])
+  @@index([documentManagerId])
+  @@index([userId])
+  @@index([parentId])
+  @@index([createdAt])
+  @@index([documentId, createdAt])
+  @@index([documentManagerId, createdAt])
+  @@index([isResolved, createdAt])
+  @@map("document_comments")
+}
+
+model ContentStorage {
+  id             BigInt   @id @default(autoincrement()) @db.BigInt
+  contentHash    String   @unique @map("content_hash") @db.VarChar(64)
+  contentType    String   @map("content_type") @db.VarChar(50)
+  contentSize    BigInt   @map("content_size") @db.BigInt
+  storagePath    String?  @map("storage_path") @db.VarChar(500)
+  contentData    String?  @map("content_data") @db.Text
+  referenceCount Int      @default(0) @map("reference_count") @db.Integer
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  documents Document[]
+
+  @@index([contentHash])
+  @@index([contentType, contentSize])
+  @@index([referenceCount])
+  @@map("content_storage")
+}
+
+// Note: Additional tables like DocumentTemplate, EditorImage, etc. can be added as needed

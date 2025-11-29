@@ -1,0 +1,1640 @@
+// Qa Hub Database Schema (DBML)
+// Test Management System with Document Management and Analytics
+// Database Type: MySQL 8.0+
+// Backend Stack: Node.js + TypeScript
+// ORM: Prisma (recommended) or TypeORM
+//
+// NAMING CONVENTIONS (Node.js/TypeScript optimized):
+// - Database columns: snake_case (MySQL convention)
+// - TypeScript models: camelCase (Prisma/TypeORM auto-converts)
+// - User references: created_by, updated_by, deleted_by (bigint with FK to users.id)
+// - Self-referential: parent_id (bigint with FK to same table)
+// - Timestamps: created_at, updated_at, deleted_at (auto-managed by Prisma/TypeORM)
+// - Soft deletes: deleted_at timestamp [null], deleted_by bigint [ref: > users.id, null]
+// - Version tracking: version integer [default: 1] for optimistic locking
+// - Status fields: status varchar or enum
+// - Count fields: {entity}_count integer [default: 0]
+// - UUID: Use for distributed systems (notifications table already uses UUID)
+//
+// PRISMA/TYPEORM NOTES:
+// - Prisma will generate TypeScript types automatically from this schema
+// - Use @map() for snake_case to camelCase conversion
+// - JSON columns work excellently with Prisma's Json type
+// - Relationships are defined in Prisma schema, not DBML
+// - Migrations: Use Prisma Migrate or TypeORM migrations
+//
+// TYPESCRIPT CONSIDERATIONS:
+// - All nullable fields should be marked as optional in TypeScript (field | null)
+// - Enums should be defined in TypeScript for type safety
+// - JSON fields: Use Prisma.JsonValue or custom types for type safety
+// - BigInt: Use BigInt type in TypeScript (Prisma handles this automatically)
+
+// ========================================
+// USER MANAGEMENT & AUTHENTICATION
+// ========================================
+// Core user accounts, password management, and API authentication tokens
+
+Table users {
+  id bigint [pk, increment]
+  name varchar
+  email varchar(100) [unique]
+  google_id varchar [unique, null]
+  google_avatar varchar [null]
+  auth_provider varchar [default: 'email']
+  role varchar [null]
+  avatar varchar [null]
+  last_login_at timestamp [null]
+  password_changed_at timestamp [null]
+  is_active boolean [default: true]
+  email_verified_at timestamp [null]
+  password varchar
+  job_role varchar [null]
+  remember_token varchar(100) [null]
+  created_at timestamp
+  updated_at timestamp
+}
+
+// Password reset tokens - temporary tokens for password reset via email
+// NOTE: When used (used_at set), old password should be added to password_history
+// NOTE: Security best practice: Revoke all personal_access_tokens when password is reset
+// Application-level relationships:
+// - password_resets.user_id → users.id (FK)
+// - password_history.password_reset_id → password_resets (optional tracking)
+// - personal_access_tokens should be revoked when password_resets.used_at is set
+Table password_resets {
+  email varchar [note: 'Email address for password reset - kept for compatibility']
+  user_id bigint [ref: > users.id, null, note: 'FK to users.id - primary relationship, on delete cascade']
+  token varchar [unique]
+  used_at timestamp [null, note: 'When password reset was completed - triggers password_history insertion']
+  expires_at timestamp [null, note: 'Token expiration time']
+  created_at timestamp [null]
+  
+  indexes {
+    (email)
+    (user_id)
+    (token) [unique]
+    (created_at)
+    (expires_at, used_at)
+    (user_id, created_at)
+    (used_at)
+  }
+}
+
+// Personal access tokens for API authentication (polymorphic - can be for users or other models)
+// NOTE: Security best practice - when password_resets.used_at is set, revoke all tokens for that user
+// Application-level relationship: password_resets.used_at → revoke all personal_access_tokens for user
+Table personal_access_tokens {
+  id bigint [pk, increment]
+  tokenable_type varchar [note: 'Model type (e.g., User, Team) - TypeScript: use class name or string literal type']
+  tokenable_id bigint [note: 'Model ID - typically users.id']
+  name varchar
+  token varchar(64) [unique]
+  token_hash varchar(64) [unique, null, note: 'Hashed version for secure lookup']
+  abilities text [null]
+  last_used_at timestamp [null]
+  last_used_ip varchar(45) [null]
+  last_used_user_agent varchar(500) [null]
+  expires_at timestamp [null]
+  revoked_at timestamp [null]
+  revoked_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (tokenable_type, tokenable_id, revoked_at)
+    (token_hash)
+    (expires_at, revoked_at)
+  }
+}
+
+// Password history for preventing password reuse
+// NOTE: When password_resets token is used, old password should be added here
+// Application-level relationship: password_resets.used_at triggers password_history insertion
+Table password_history {
+  id bigint [pk, increment]
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  password_hash varchar [note: 'Hashed password (bcrypt/argon2id)']
+  password_reset_id bigint [null, note: 'Optional: Link to password_resets if reset via email token']
+  created_at timestamp
+  
+  indexes {
+    (user_id, created_at)
+    (password_reset_id)
+  }
+}
+
+// ========================================
+// AUTHORIZATION & PERMISSIONS
+// ========================================
+// Role-based access control (RBAC) and permission management
+
+Table permissions {
+  id bigint [pk, increment]
+  name varchar
+  guard_name varchar
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (name, guard_name) [unique]
+  }
+}
+
+Table roles {
+  id bigint [pk, increment]
+  name varchar
+  guard_name varchar
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (name, guard_name) [unique]
+  }
+}
+
+// Direct user-role assignment table - PREFERRED for better performance and referential integrity
+// Use this instead of model_has_roles when only assigning roles to users
+Table user_roles {
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  role_id bigint [ref: > roles.id, note: 'on delete cascade']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (user_id, role_id) [pk]
+    (user_id)
+    (role_id)
+  }
+}
+
+// Direct user-permission assignment table - PREFERRED for better performance and referential integrity
+// Use this instead of model_has_permissions when only assigning permissions to users
+Table user_permissions {
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  permission_id bigint [ref: > permissions.id, note: 'on delete cascade']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (user_id, permission_id) [pk]
+    (user_id)
+    (permission_id)
+  }
+}
+
+// DEPRECATED: Polymorphic permission assignment - kept for backward compatibility
+// NOTE: Prefer user_permissions table for better performance and FK constraints
+// This table supports assigning permissions to any model (User, Team, etc.)
+// When model_type = 'User', use user_permissions table instead
+// TypeScript: Use discriminated union types for type safety
+Table model_has_permissions {
+  permission_id bigint [ref: > permissions.id]
+  model_type varchar [note: 'Model type string (e.g., User, Team) - TypeScript: use string literal union type']
+  model_id bigint [note: 'ID of the model - when model_type is User, this is users.id']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (model_id, model_type)
+    (permission_id, model_id, model_type) [pk]
+    (model_type, model_id) [note: 'For filtering by model type']
+  }
+  // Application-level constraint: When model_type = 'User', model_id must exist in users.id
+  // Migration: Move User records from model_has_permissions to user_permissions table
+}
+
+// DEPRECATED: Polymorphic role assignment - kept for backward compatibility
+// NOTE: Prefer user_roles table for better performance and FK constraints
+// This table supports assigning roles to any model (User, Team, etc.)
+// When model_type = 'User', use user_roles table instead
+// TypeScript: Use discriminated union types for type safety
+Table model_has_roles {
+  role_id bigint [ref: > roles.id]
+  model_type varchar [note: 'Model type string (e.g., User, Team) - TypeScript: use string literal union type']
+  model_id bigint [note: 'ID of the model - when model_type is User, this is users.id']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (model_id, model_type)
+    (role_id, model_id, model_type) [pk]
+    (model_type, model_id) [note: 'For filtering by model type']
+  }
+  // Application-level constraint: When model_type = 'User', model_id must exist in users.id
+  // Migration: Move User records from model_has_roles to user_roles table
+}
+
+Table role_has_permissions {
+  permission_id bigint [ref: > permissions.id]
+  role_id bigint [ref: > roles.id]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (permission_id, role_id) [pk]
+  }
+}
+
+// ========================================
+// MULTI-TENANCY
+// ========================================
+// Tenant management for SaaS monetization
+// CRITICAL: All tenant-scoped tables MUST include tenant_id column
+// Enforce tenant isolation at application level (MySQL doesn't support native RLS)
+
+Table tenants {
+  id bigint [pk, increment]
+  name varchar [unique]
+  slug varchar [unique, note: 'URL-friendly identifier for subdomain routing']
+  domain varchar [unique, null, note: 'Custom domain for white-label deployments']
+  subdomain varchar [unique, null, note: 'Subdomain identifier (e.g., company1.qahub.com)']
+  plan varchar [default: 'free', note: 'free, starter, professional, enterprise - for monetization']
+  status enum [default: 'active', note: 'active, suspended, cancelled, trial']
+  max_users integer [default: 5, note: 'User limit based on plan']
+  max_projects integer [default: 3, note: 'Project limit based on plan']
+  features json [null, note: 'Feature flags per tenant (e.g., ["analytics", "api_access", "sso"])']
+  billing_email varchar [null, note: 'Billing contact email']
+  subscription_id varchar [null, note: 'External subscription ID (Stripe, etc.)']
+  trial_ends_at timestamp [null, note: 'Trial expiration date']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (slug) [unique]
+    (domain) [unique]
+    (subdomain) [unique]
+    (plan, status)
+    (status)
+  }
+}
+
+// Junction table for tenant-user relationships
+// Users can belong to multiple tenants (multi-tenant users)
+Table tenant_users {
+  tenant_id bigint [ref: > tenants.id, note: 'on delete cascade']
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  role varchar [default: 'member', note: 'owner, admin, member, viewer - role within this tenant']
+  invited_by bigint [ref: > users.id, null, note: 'User who invited this user to tenant']
+  joined_at timestamp [default: 'CURRENT_TIMESTAMP']
+  created_at timestamp
+  
+  indexes {
+    (tenant_id, user_id) [pk]
+    (user_id, tenant_id)
+    (tenant_id, role)
+    (user_id)
+  }
+}
+
+// ========================================
+// PROJECTS & REPOSITORIES
+// ========================================
+// Project organization and repository management
+
+// NOTE: For multi-tenant scenarios, add tenant_id column:
+// tenant_id bigint [ref: > tenants.id, note: 'for multi-tenant row-level security']
+// Index: (tenant_id, id)
+// MySQL doesn't support RLS natively - use application-level filtering or views
+Table projects {
+  id bigint [pk, increment]
+  tenant_id bigint [ref: > tenants.id, note: 'CRITICAL: Tenant isolation - on delete cascade']
+  title varchar
+  description varchar [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (tenant_id, id) [note: 'Composite index for tenant-scoped queries']
+    (tenant_id, created_at)
+    (created_at)
+    (created_by)
+    (title)
+  }
+}
+  id bigint [pk, increment]
+  title varchar
+  description varchar [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (created_at)
+    (created_by)
+    (title)
+  }
+}
+
+Table repositories {
+  id bigint [pk, increment]
+  tenant_id bigint [ref: > tenants.id, note: 'CRITICAL: Tenant isolation - on delete cascade']
+  project_id bigint [ref: > projects.id, note: 'on delete cascade']
+  title varchar
+  prefix varchar
+  description text [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (tenant_id, id) [note: 'Composite index for tenant-scoped queries']
+    (tenant_id, project_id)
+    (project_id)
+    (project_id, created_at)
+    (created_by)
+    (title)
+  }
+}
+
+Table settings {
+  id bigint [pk, increment]
+  key varchar [unique]
+  value text [null]
+  type varchar [default: 'string']
+  category varchar [null, note: 'Category for grouping settings (e.g., bug_budget, system, etc.)']
+  description text [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (category)
+    (type, category)
+    (created_by)
+  }
+}
+
+// ========================================
+// TEST PLANNING & ORGANIZATION
+// ========================================
+// Test suites, test cases, test plans, and test case organization
+
+Table suites {
+  id bigint [pk, increment]
+  repository_id bigint [ref: > repositories.id, note: 'on delete cascade']
+  parent_id bigint [ref: > suites.id, null, note: 'self-referential for hierarchy, on delete set null']
+  title varchar
+  order integer [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (repository_id)
+    (parent_id)
+    (repository_id, parent_id)
+    (created_by)
+    (repository_id, order)
+  }
+}
+
+Table test_cases {
+  id bigint [pk, increment]
+  tenant_id bigint [ref: > tenants.id, note: 'CRITICAL: Tenant isolation - on delete cascade']
+  suite_id bigint [ref: > suites.id, note: 'on delete cascade']
+  title varchar
+  description longtext [null]
+  labels varchar [null]
+  automated boolean [default: false]
+  priority integer [default: 2]
+  data longtext [null, note: 'JSON: test steps, expected results']
+  // JSON Column Optimization Strategy:
+  // Option A: Generated columns for frequently queried JSON paths (MySQL 5.7+)
+  // data_steps_count integer [generated, note: 'VIRTUAL: JSON_LENGTH(data, "$.steps")']
+  // data_has_automation boolean [generated, note: 'VIRTUAL: JSON_EXTRACT(data, "$.automated")']
+  // Option B: Extract critical fields to denormalized columns
+  // steps_count integer [null, note: 'denormalized from data JSON']
+  // has_automation boolean [default: false, note: 'denormalized from data']
+  // Option C: Full-text search on JSON (MySQL 5.7+)
+  // CREATE INDEX idx_test_case_data ON test_cases ((CAST(data->>'$.title' AS CHAR(255))));
+  order integer [null]
+  regression boolean [default: true]
+  epic_link varchar [null]
+  linked_issue varchar [null]
+  jira_key varchar(45) [null]
+  platform longtext [null]
+  release_version varchar [null]
+  severity varchar(45) [default: 'Moderate']
+  defect_stage enum [null, note: 'pre_development, development, post_development, release_production - Stage where this test is designed to catch defects']
+  version integer [default: 1, note: 'For optimistic locking']
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  deleted_by bigint [ref: > users.id, null, note: 'on delete set null']
+  deleted_at timestamp [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (tenant_id, id) [note: 'Composite index for tenant-scoped queries']
+    (tenant_id, suite_id)
+    (suite_id)
+    (jira_key)
+    (automated, priority)
+    (created_by, created_at)
+    (deleted_at)
+    (defect_stage)
+    (automated, defect_stage)
+    (title, description) [type: fulltext, note: 'Full-text search']
+    // Index on generated column (uncomment when generated columns are added):
+    // (data_steps_count)
+  }
+}
+
+Table test_plans {
+  id bigint [pk, increment]
+  project_id bigint [ref: > projects.id, note: 'on delete cascade']
+  repository_id bigint [ref: > repositories.id, note: 'on delete cascade']
+  title varchar
+  description text [null]
+  status varchar [default: 'draft', note: 'draft, active, archived']
+  data text [null, note: 'DEPRECATED: comma-separated test case IDs - use test_plan_test_cases junction table instead']
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project_id, repository_id)
+    (project_id, repository_id, status)
+    (created_by)
+    (title)
+    (status)
+  }
+}
+
+// Junction table for test_plans and test_cases (replaces comma-separated data field)
+Table test_plan_test_cases {
+  test_plan_id bigint [ref: > test_plans.id, note: 'on delete cascade']
+  test_case_id bigint [ref: > test_cases.id, note: 'on delete cascade']
+  order integer [default: 0, note: 'Order of test case in plan']
+  created_at timestamp
+  
+  indexes {
+    (test_plan_id, test_case_id) [pk]
+    (test_plan_id, order)
+    (test_case_id)
+  }
+}
+
+// Explicit comment table for test cases (replaces polymorphic pattern)
+Table test_case_comments {
+  id bigint [pk, increment]
+  test_case_id bigint [ref: > test_cases.id, note: 'on delete cascade']
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  parent_id bigint [ref: > test_case_comments.id, null, note: 'nested replies, on delete cascade']
+  content text
+  is_resolved boolean [default: false]
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp [null]
+  
+  indexes {
+    (test_case_id)
+    (user_id)
+    (parent_id)
+    (created_at)
+    (test_case_id, is_resolved, created_at)
+  }
+}
+
+// ========================================
+// TEST EXECUTION & RESULTS
+// ========================================
+// Test run execution, results, attachments, and comments
+
+// Test run execution - represents a single execution of a test plan
+// Relationship to test_cases: test_runs -> test_plan_id -> test_plans -> test_plan_test_cases -> test_cases
+// Execution results: test_runs -> test_run_results -> test_cases (individual test case execution results)
+Table test_runs {
+  id bigint [pk, increment]
+  test_plan_id bigint [ref: > test_plans.id, note: 'on delete cascade']
+  project_id bigint [ref: > projects.id, note: 'on delete cascade']
+  repository_id bigint [ref: > repositories.id, null, note: 'FK to repositories.id - denormalized from test_plans for faster queries']
+  title varchar
+  status enum [default: 'pending', note: 'pending, running, completed, failed, cancelled']
+  execution_date date [null, note: 'Date when test run was executed']
+  started_at timestamp [null, note: 'When test run execution started']
+  completed_at timestamp [null, note: 'When test run execution completed']
+  environment varchar [null, note: 'Environment where tests were run (dev, staging, prod, etc.)']
+  build_version varchar [null, note: 'Build/version number being tested']
+  data text [null, note: 'DEPRECATED: JSON execution results - use test_run_results table instead']
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project_id, created_at)
+    (test_plan_id, created_at)
+    (repository_id, created_at)
+    (created_by, created_at)
+    (title)
+    (status, execution_date)
+    (execution_date)
+    (status, started_at)
+    (environment, execution_date)
+  }
+}
+
+// Normalized table for test run results (replaces JSON data field)
+// Links test_runs to test_cases with execution results
+// This is the execution relationship: test_runs -> test_run_results -> test_cases
+Table test_run_results {
+  id bigint [pk, increment]
+  test_run_id bigint [ref: > test_runs.id, note: 'on delete cascade']
+  test_case_id bigint [ref: > test_cases.id, note: 'on delete cascade']
+  status enum [note: 'passed, failed, skipped, blocked']
+  execution_time integer [null, note: 'milliseconds']
+  error_message text [null]
+  stack_trace text [null, note: 'Full stack trace for failed tests']
+  screenshots json [null]
+  logs text [null, note: 'Test execution logs']
+  defect_found_at_stage enum [null, note: 'pre_development, development, post_development, release_production - Stage where defect was actually found when test failed']
+  bug_budget_id bigint [ref: > bug_budget.id, null, note: 'FK to bug_budget.id if a bug/defect was created from this failed test']
+  defect_severity varchar [null, note: 'Severity of defect found (critical, high, medium, low)']
+  executed_by bigint [ref: > users.id, null, note: 'on delete set null']
+  executed_at timestamp [null]
+  retry_count integer [default: 0, note: 'Number of retries for this test case']
+  created_at timestamp
+  
+  indexes {
+    (test_run_id, status)
+    (test_case_id, status)
+    (test_run_id, test_case_id) [unique]
+    (executed_by, executed_at)
+    (test_run_id, executed_at)
+    (status, executed_at)
+    (defect_found_at_stage, executed_at)
+    (bug_budget_id)
+    (status, defect_found_at_stage)
+  }
+}
+
+Table test_runs_attachments {
+  id bigint [pk, increment]
+  url varchar
+  test_run_id bigint [ref: > test_runs.id, note: 'on delete cascade']
+  test_case_id bigint [ref: > test_cases.id, note: 'on delete cascade']
+  uploaded_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  
+  indexes {
+    (test_run_id)
+    (test_case_id)
+    (test_run_id, test_case_id)
+    (uploaded_by)
+  }
+}
+
+Table test_runs_comments {
+  id bigint [pk, increment]
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  comments text
+  test_run_id bigint [ref: > test_runs.id, note: 'on delete cascade']
+  test_plan_id bigint [ref: > test_plans.id, note: 'on delete cascade']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (test_run_id, created_at)
+    (test_plan_id, created_at)
+    (user_id, created_at)
+  }
+}
+
+// ========================================
+// DOCUMENT MANAGEMENT
+// ========================================
+// Document storage, versioning, comments, engagements, and templates
+// NOTE: Two document systems exist (documents, documents_manager)
+// documents_manager is deprecated - consider consolidating into documents table
+// Migration path: 1) Mark as deprecated, 2) Create migration scripts, 3) Update references, 4) Drop tables
+Table documents {
+  id bigint [pk, increment]
+  tenant_id bigint [ref: > tenants.id, note: 'CRITICAL: Tenant isolation - on delete cascade']
+  project_id bigint [ref: > projects.id, note: 'on delete cascade']
+  parent_id bigint [ref: > documents.id, null, note: 'self-referential for hierarchy, on delete set null']
+  title varchar
+  content text [null, note: 'Legacy - consider migrating to content_id for large content']
+  content_id bigint [ref: > content_storage.id, null, note: 'Reference to content_storage for large content']
+  version integer [default: 1, note: 'For optimistic locking']
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  last_edited_by bigint [ref: > users.id, null, note: 'on delete set null']
+  deleted_by bigint [ref: > users.id, null, note: 'on delete set null']
+  views_count integer [default: 0]
+  likes_count integer [default: 0]
+  stars_count integer [default: 0]
+  deleted_at timestamp [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (tenant_id, id) [note: 'Composite index for tenant-scoped queries']
+    (tenant_id, project_id, created_at)
+    (project_id, created_at)
+    (parent_id)
+    (deleted_at)
+    (content_id)
+    (title, content) [type: fulltext, note: 'Full-text search']
+  }
+}
+
+Table document_versions {
+  id bigint [pk, increment]
+  document_id bigint [ref: > documents.id, note: 'on delete cascade']
+  title varchar
+  content longtext
+  version_number integer
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  change_summary text [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (document_id)
+    (version_number)
+    (created_at)
+  }
+}
+
+// Unified comment table for both documents and documents_manager (deprecated)
+// Supports both document systems during migration period
+Table document_comments {
+  id bigint [pk, increment]
+  // Support both document systems (one must be set, enforced at application level)
+  document_id bigint [ref: > documents.id, null, note: 'on delete cascade - null if document_manager_id is set']
+  document_manager_id bigint [ref: > documents_manager.id, null, note: 'DEPRECATED: on delete cascade - null if document_id is set']
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  parent_id bigint [ref: > document_comments.id, null, note: 'nested replies, on delete cascade']
+  content text
+  comment_type varchar [default: 'general', note: 'general or inline - from documents_manager system']
+  is_resolved boolean [default: false]
+  mentioned_user_ids json [null, note: 'Array of user IDs mentioned in comment - from documents_manager system']
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp [null]
+  
+  indexes {
+    (document_id)
+    (document_manager_id)
+    (user_id)
+    (parent_id)
+    (created_at)
+    (document_id, created_at)
+    (document_manager_id, created_at)
+    (is_resolved, created_at)
+    // Check constraint (application-level): (document_id IS NOT NULL) XOR (document_manager_id IS NOT NULL)
+  }
+}
+
+// NOTE: Combined document_likes, document_stars, and document_views into single table
+// This reduces redundancy and makes it easier to add new engagement types
+Table document_engagements {
+  id bigint [pk, increment]
+  document_id bigint [ref: > documents.id, note: 'on delete cascade']
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  engagement_type enum [note: 'like, star, view']
+  viewed_at timestamp [null, note: 'only populated for view type']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (document_id, user_id, engagement_type) [unique]
+    (document_id)
+    (user_id)
+    (engagement_type)
+    (viewed_at)
+  }
+}
+
+// DEPRECATED: Will be removed in future version - consider consolidating into documents table
+// Migration: When migrating, set migrated_to_document_id to track which document this became
+Table documents_manager {
+  id bigint [pk, increment]
+  title varchar
+  content text [null]
+  type varchar [null]
+  status varchar [default: 'draft']
+  author_id bigint [ref: > users.id, null, note: 'on delete set null']
+  last_edited_by_id bigint [ref: > users.id, null, note: 'on delete set null']
+  parent_id bigint [ref: > documents_manager.id, null, note: 'self-referential, on delete set null']
+  migrated_to_document_id bigint [ref: > documents.id, null, note: 'Set when migrated to documents table - tracks migration']
+  deleted_at timestamp [null]
+  deleted_by_id bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (author_id)
+    (parent_id)
+    (status)
+    (deleted_at)
+    (type, status)
+    (migrated_to_document_id)
+  }
+}
+
+Table document_manager_reviewer {
+  id bigint [pk, increment]
+  document_manager_id bigint [ref: > documents_manager.id, note: 'on delete cascade']
+  user_id bigint [ref: > users.id, note: 'on delete cascade']
+  status varchar [default: 'pending']
+  comments text [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (document_manager_id, status)
+    (user_id, status)
+    (document_manager_id, user_id) [unique]
+  }
+}
+
+Table document_templates {
+  id bigint [pk, increment]
+  name varchar
+  type varchar
+  content text
+  variables json [null]
+  is_active boolean [default: true]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (type, is_active)
+    (created_by)
+    (name)
+  }
+}
+
+Table editor_images {
+  id bigint [pk, increment]
+  filename varchar
+  original_name varchar
+  path varchar
+  mime_type varchar
+  size integer
+  uploaded_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (uploaded_by, created_at)
+    (mime_type)
+    (filename)
+  }
+}
+
+// ========================================
+// PRD REVIEW & REQUIREMENTS
+// ========================================
+// Product Requirements Document (PRD) review and caching
+
+Table prd_reviews {
+  id bigint [pk, increment]
+  title varchar
+  content text
+  status varchar [default: 'draft']
+  project_id bigint [ref: > projects.id, null, note: 'on delete set null']
+  reviewed_by bigint [ref: > users.id, null, note: 'on delete set null']
+  reviewed_at timestamp [null]
+  comments text [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project_id, status)
+    (status, reviewed_at)
+    (reviewed_by, reviewed_at)
+    (created_by)
+    (title)
+  }
+}
+
+// Cache table for PRD review computed data and analysis results
+// Stores processed/analyzed data to avoid recomputation
+Table prd_review_cache {
+  id bigint [pk, increment]
+  prd_review_id bigint [ref: > prd_reviews.id, null, note: 'FK to prd_reviews.id - primary relationship, on delete cascade']
+  cache_key varchar [unique, note: 'Cache key for flexible caching scenarios (can be independent of prd_review_id)']
+  cache_type varchar [null, note: 'Type of cached data (e.g., analysis, summary, metrics, etc.)']
+  data json
+  expires_at timestamp
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (prd_review_id)
+    (cache_key) [unique]
+    (expires_at)
+    (cache_key, expires_at)
+    (prd_review_id, cache_type)
+    (cache_type, expires_at)
+  }
+}
+
+// ========================================
+// BUG TRACKING & ISSUE MANAGEMENT
+// ========================================
+// Bug tracking, Jira integration, and issue management
+
+// Core bug tracking table - normalized to essential fields
+// NOTE: Partitioning recommended for large datasets (3,748+ rows, growing)
+// Partition by RANGE (YEAR(created_date), MONTH(created_date)) - monthly partitions
+// Benefits: Faster queries (partition pruning), easier archiving (drop old partitions)
+Table bug_budget {
+  id bigint [pk, increment]
+  jira_key varchar [unique]
+  project varchar [note: 'Project name/identifier from Jira']
+  project_id bigint [ref: > projects.id, null, note: 'FK to projects.id if project exists in system']
+  summary text
+  status varchar [null]
+  issue_type varchar [null]
+  final_issue_type varchar [null]
+  priority varchar [null]
+  severity_issue varchar [null]
+  sprint varchar [null]
+  status_category varchar [null]
+  assignee_final varchar [null, note: 'Assignee name/email from Jira']
+  assignee_id bigint [ref: > users.id, null, note: 'FK to users.id if assignee is system user']
+  reporter varchar [null, note: 'Reporter name/email from Jira']
+  reporter_id bigint [ref: > users.id, null, note: 'FK to users.id if reporter is system user']
+  creator varchar [null, note: 'Creator name/email from Jira']
+  creator_id bigint [ref: > users.id, null, note: 'FK to users.id if creator is system user']
+  labels text [null]
+  is_open boolean [default: true]
+  created_date timestamp [null]
+  updated_date timestamp [null]
+  resolved_date timestamp [null]
+  due_date timestamp [null]
+  last_synced_at timestamp [null]
+  description text [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project, status, is_open)
+    (project_id, status, is_open)
+    (assignee_final, status)
+    (assignee_id, status)
+    (sprint, status_category)
+    (created_date, resolved_date)
+    (jira_key, last_synced_at)
+    (project_id)
+  }
+}
+
+// Extended metadata table - stores all additional fields as JSON
+// This normalizes the 80+ column table into manageable structure
+// NOTE: Generated columns can be added for frequently queried JSON paths (MySQL 5.7+)
+// Example: epic_name varchar [generated, note: 'VIRTUAL: epic_hierarchy->>"$.epic_name"']
+// JSON Optimization Strategy:
+// - Use generated columns for frequently queried paths
+// - Extract critical fields to denormalized columns if needed
+// - Index generated columns for fast queries
+// - Keep JSON for flexibility, use generated columns for performance
+Table bug_budget_metadata {
+  bug_budget_id bigint [ref: > bug_budget.id, note: 'on delete cascade', pk]
+  // Epic hierarchy fields (consolidated as JSON)
+  epic_hierarchy json [null, note: 'epic_name, parent, parent_link, epic_level_epic, story_task_level_epic_name, parent_epic_layer_2_key, parent_epic_key, final_epic_name, linked_parent_epic_info, pic_story_task_link_summary, epic_task_story_name_summary']
+  // Assignee details (consolidated as JSON)
+  assignee_details json [null, note: 'tester_assignee, test_engineer_assignee, assignee, engineer_assignee, qa_checker, tested_by, owner']
+  // Date fields (consolidated as JSON)
+  date_fields json [null, note: 'start_date, begin_date, end_date, chart_date_first_response, actual_start, actual_end, status_category_changed']
+  // Analysis fields (consolidated as JSON)
+  analysis_fields json [null, note: 'first_response_age_days, defect_age_days, defect_age_bucket, defect_count, bug_count, time_spent_seconds, progress_percentage, time_to_resolution_hours, bug_cost']
+  // Classification fields (consolidated as JSON)
+  classification_fields json [null, note: 'service_feature, service_feature_final, issue_level_type_layer_1, issue_level_layer_2_type, final_issue, epic_final_issue_type, real_project']
+  // Report fields (consolidated as JSON)
+  report_fields json [null, note: 'reports, pic_report, ac_related_labels, linked_issues']
+  // Story points (consolidated as JSON)
+  story_points_data json [null, note: 'story_point_estimate, story_points']
+  // Version fields (consolidated as JSON)
+  version_fields json [null, note: 'components, fix_versions']
+  // Raw Jira data (keep as-is for sync operations)
+  raw_jira_data json [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (bug_budget_id) [unique]
+    // Index on generated column (uncomment when generated columns are added):
+    // (epic_name)  // If epic_name is generated from epic_hierarchy
+  }
+}
+
+// NOTE: bug_budget_settings merged into settings table with category field
+// NOTE: jira_table removed - use jira_table_history instead (more comprehensive, includes all fields)
+// jira_table_history can be filtered by synced_at DESC LIMIT 1 per issuekey for current snapshots
+
+// Historical Jira data table (also used for current snapshots)
+// NOTE: Partitioning recommended - partition by RANGE (YEAR(synced_at), MONTH(synced_at)) - monthly partitions
+// Auto-archive records older than 1 year to jira_table_history_archive
+Table jira_table_history {
+  id bigint [pk, increment]
+  project varchar [null]
+  issuetype varchar [null]
+  issuekey varchar [unique]
+  summary text [null]
+  description longtext [null]
+  acceptance_criteria longtext [null]
+  implementation_detail longtext [null]
+  components json [null]
+  epic_link varchar [null]
+  epic_name varchar [null]
+  epic_status varchar [null]
+  fix_versions json [null]
+  priority varchar [null]
+  severity_issue varchar [null]
+  comment json [null]
+  subtasks json [null]
+  parent varchar [null]
+  parent_link varchar [null]
+  labels json [null]
+  linked_issues json [null]
+  linked_items json [null]
+  linked_test_document varchar [null]
+  test_run_link varchar [null]
+  user_journey varchar [null]
+  service_feature varchar [null]
+  created timestamp [null]
+  begin_date timestamp [null]
+  start_date date [null]
+  actual_start timestamp [null]
+  due_date date [null]
+  end_date timestamp [null]
+  actual_end timestamp [null]
+  sprint varchar [null]
+  sprint_id bigint [null]
+  sprint_state varchar [null]
+  sprint_complete_date timestamp [null]
+  sprint_start_date timestamp [null]
+  sprint_end_date timestamp [null]
+  sprint_goal_id bigint [null]
+  status varchar [null]
+  status_category varchar [null]
+  status_category_changed timestamp [null]
+  owner varchar [null]
+  approvers json [null]
+  assignee varchar [null]
+  engineer_assignee json [null]
+  collaborators json [null]
+  tester_assignee varchar [null]
+  reporter varchar [null]
+  story_points decimal(10,2) [null]
+  story_point_estimate decimal(10,2) [null]
+  re_test_point decimal(10,2) [null]
+  log_work json [null]
+  original_estimate integer [null]
+  time_spent integer [null]
+  time_tracking json [null]
+  time_to_first_response varchar [null]
+  time_to_resolution varchar [null]
+  time_to_close_after_resolution varchar [null]
+  tis_al_board varchar [null]
+  chart_date_of_first_response timestamp [null]
+  chart_time_in_status json [null]
+  updated timestamp [null]
+  resolution varchar [null]
+  resolved timestamp [null]
+  raw_jira_data json [null]
+  synced_at timestamp [null]
+  sync_source varchar [null]
+  jql_query_used text [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project)
+    (issuetype)
+    (issuekey)
+    (epic_link)
+    (priority)
+    (created)
+    (updated)
+    (status)
+    (assignee)
+    (reporter)
+    (sprint)
+    (sprint_id)
+    (synced_at)
+    (project, issuetype)
+    (status, created)
+    (assignee, status)
+    (created, resolved)
+    (sprint_state, sprint_complete_date)
+    (sprint_complete_date)
+  }
+}
+
+Table jira_fields {
+  id bigint [pk, increment]
+  field_type varchar
+  field_id varchar [unique]
+  description text [null]
+  is_custom boolean [default: false]
+  is_active boolean [default: true]
+  sort_order integer [default: 0]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp [null]
+  updated_at timestamp [null]
+  
+  indexes {
+    (field_id)
+    (is_custom)
+    (is_active)
+    (field_type, is_active)
+    (created_by)
+  }
+}
+
+// ========================================
+// ANALYTICS & REPORTING
+// ========================================
+// Test reports (Allure), GitLab metrics, Jira lead times, and contribution tracking
+
+Table allure_report {
+  id bigint [pk, increment]
+  name varchar
+  version varchar [null]
+  summary json [null]
+  status varchar [default: 'pending']
+  execution_started_at timestamp [null]
+  execution_stopped_at timestamp [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (status, created_at)
+    (execution_started_at)
+    (name, version)
+    (created_by)
+  }
+}
+
+Table allure_scenarios {
+  id bigint [pk, increment]
+  allure_report_id bigint [ref: > allure_report.id, note: 'on delete cascade']
+  name varchar
+  status varchar
+  duration integer [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (allure_report_id)
+    (allure_report_id, status)
+    (status, duration)
+  }
+}
+
+Table allure_steps {
+  id bigint [pk, increment]
+  scenario_id bigint [ref: > allure_scenarios.id, note: 'on delete cascade']
+  name varchar
+  status varchar
+  duration integer [null]
+  error_message text [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (scenario_id, status)
+    (status, duration)
+  }
+}
+
+Table gitlab_mr_lead_times {
+  id bigint [pk, increment]
+  project_name varchar [note: 'Application-level reference to projects.title']
+  project_id bigint [ref: > projects.id, null, note: 'FK to projects.id if project exists in system']
+  mr_id varchar
+  title varchar
+  author varchar [note: 'Application-level reference to users.email/name']
+  author_id bigint [ref: > users.id, null, note: 'FK to users.id if author is system user']
+  mr_created_at timestamp
+  merged_at timestamp [null]
+  lead_time_hours integer [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project_name, mr_created_at)
+    (project_id, mr_created_at)
+    (author, mr_created_at)
+    (author_id, mr_created_at)
+    (merged_at)
+    (project_name, author)
+    (project_id, author_id)
+  }
+}
+
+Table gitlab_mr_contributors {
+  id bigint [pk, increment]
+  project_name varchar [note: 'Application-level reference to projects.title']
+  project_id bigint [ref: > projects.id, null, note: 'FK to projects.id if project exists in system']
+  username varchar
+  user_id bigint [ref: > users.id, null, note: 'FK to users.id if user exists in system']
+  name varchar [null]
+  email varchar [null]
+  contributions integer [default: 0]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project_name, username) [unique]
+    (project_id, user_id) [unique]
+    (project_name, contributions)
+    (project_id, contributions)
+    (username)
+    (user_id)
+  }
+}
+
+Table jira_lead_times {
+  id bigint [pk, increment]
+  project_key varchar
+  project_id bigint [ref: > projects.id, null, note: 'FK to projects.id if project exists in system']
+  issue_key varchar
+  bug_budget_id bigint [ref: > bug_budget.id, null, note: 'FK to bug_budget.id if issue exists in system']
+  issue_type varchar
+  status varchar
+  issue_created_at timestamp
+  resolved_at timestamp [null]
+  lead_time_hours integer [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (project_key, issue_created_at)
+    (project_id, issue_created_at)
+    (issue_key) [unique]
+    (bug_budget_id)
+    (status, resolved_at)
+    (project_key, status)
+    (project_id, status)
+    (issue_type, status)
+  }
+}
+
+Table monthly_contributions {
+  id bigint [pk, increment]
+  year integer
+  month integer
+  month_name varchar
+  username varchar [note: 'Application-level reference to users']
+  user_id bigint [ref: > users.id, null, note: 'FK to users.id if user exists in system']
+  name varchar [null]
+  squad varchar [null]
+  mr_created integer [default: 0]
+  mr_approved integer [default: 0]
+  repo_pushes integer [default: 0]
+  total_events integer [default: 0]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (year, month, username) [unique]
+    (year, month, user_id) [unique]
+    (year, month)
+    (username, year, month)
+    (user_id, year, month)
+    (squad, year, month)
+  }
+}
+
+// ========================================
+// ANALYTICS SUMMARY TABLES
+// ========================================
+// Pre-aggregated summary tables for fast analytics queries
+// Materialized views updated via scheduled jobs (daily/hourly)
+// Node.js/TS Implementation: Use node-cron, BullMQ, or Agenda.js for scheduled jobs
+// Recommended: BullMQ with Redis for reliable job processing
+
+Table test_execution_summary {
+  id bigint [pk, increment]
+  project_id bigint [ref: > projects.id, note: 'on delete cascade']
+  date date
+  total_runs integer [default: 0]
+  passed_runs integer [default: 0]
+  failed_runs integer [default: 0]
+  skipped_runs integer [default: 0]
+  blocked_runs integer [default: 0]
+  automated_count integer [default: 0]
+  manual_count integer [default: 0]
+  avg_execution_time decimal(10,2) [null, note: 'seconds']
+  total_test_cases integer [default: 0]
+  last_updated_at timestamp
+  
+  indexes {
+    (project_id, date) [unique]
+    (date)
+    (project_id, date, last_updated_at)
+  }
+}
+
+Table bug_analytics_daily {
+  id bigint [pk, increment]
+  project varchar [note: 'Project name/identifier']
+  project_id bigint [ref: > projects.id, null, note: 'FK to projects.id if project exists in system']
+  date date
+  bugs_created integer [default: 0]
+  bugs_resolved integer [default: 0]
+  bugs_closed integer [default: 0]
+  bugs_reopened integer [default: 0]
+  avg_resolution_hours decimal(10,2) [null]
+  open_bugs integer [default: 0]
+  critical_bugs integer [default: 0]
+  high_priority_bugs integer [default: 0]
+  medium_priority_bugs integer [default: 0]
+  low_priority_bugs integer [default: 0]
+  last_updated_at timestamp
+  
+  indexes {
+    (project, date) [unique]
+    (project_id, date) [unique]
+    (date)
+    (project, date, last_updated_at)
+    (project_id, date, last_updated_at)
+  }
+}
+
+Table test_case_analytics {
+  id bigint [pk, increment]
+  project_id bigint [ref: > projects.id, note: 'on delete cascade']
+  repository_id bigint [ref: > repositories.id, note: 'on delete cascade']
+  date date
+  total_cases integer [default: 0]
+  automated_cases integer [default: 0]
+  manual_cases integer [default: 0]
+  high_priority_cases integer [default: 0]
+  medium_priority_cases integer [default: 0]
+  low_priority_cases integer [default: 0]
+  regression_cases integer [default: 0]
+  last_updated_at timestamp
+  
+  indexes {
+    (project_id, repository_id, date) [unique]
+    (date)
+    (project_id, date)
+  }
+}
+
+// ========================================
+// AUDIT & LOGGING
+// ========================================
+// Decision logs, audit trails, and event sourcing for compliance and tracking
+
+Table decision_logs {
+  id bigint [pk, increment]
+  title varchar
+  decision_type varchar
+  decision_owner varchar [null, note: 'User name/email - application-level reference to users']
+  decision_owner_id bigint [ref: > users.id, null, note: 'FK to users.id if owner is system user']
+  involved_qa text [null]
+  decision_date date
+  sprint_release varchar [null]
+  context text [null]
+  decision text
+  impact_risk text [null]
+  status varchar [default: 'active']
+  tags json [null]
+  related_artifacts text [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (decision_type, status)
+    (decision_date)
+    (status, decision_date)
+    (decision_owner)
+    (decision_owner_id)
+    (created_by)
+  }
+}
+
+// Audit trail table - grows indefinitely
+// NOTE: Partitioning recommended - partition by RANGE (YEAR(created_at), MONTH(created_at)) - monthly partitions
+// Auto-archive records older than 2 years to audit_logs_archive
+Table audit_logs {
+  id bigint [pk, increment]
+  user_id bigint [ref: > users.id, null, note: 'on delete set null']
+  action varchar
+  model_type varchar [null]
+  model_id bigint [null]
+  old_values json [null]
+  new_values json [null]
+  ip_address varchar [null]
+  user_agent varchar [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (model_type, model_id, created_at)
+    (user_id, created_at)
+    (action, created_at)
+  }
+}
+
+// Event sourcing table for comprehensive audit trail
+// Stores all events as immutable append-only log
+// Enables time-travel queries, event replay, and complete audit history
+Table audit_events {
+  id bigint [pk, increment]
+  event_type varchar [note: 'created, updated, deleted, restored, archived']
+  aggregate_type varchar [note: 'test_case, document, bug_budget, test_run, etc.']
+  aggregate_id bigint
+  user_id bigint [ref: > users.id, null, note: 'on delete set null']
+  event_data json [note: 'Complete event payload - all changed fields']
+  metadata json [note: 'IP, user_agent, request_id, session_id, etc.']
+  occurred_at timestamp [default: 'CURRENT_TIMESTAMP']
+  
+  indexes {
+    (aggregate_type, aggregate_id, occurred_at)
+    (user_id, occurred_at)
+    (event_type, occurred_at)
+    (aggregate_type, event_type, occurred_at)
+  }
+}
+
+// ========================================
+// SYSTEM CONFIGURATION
+// ========================================
+// Menu visibility, notifications, and system settings
+
+Table menu_visibilities {
+  id bigint [pk, increment]
+  menu_key varchar [unique]
+  menu_name varchar
+  is_visible boolean [default: true]
+  parent_key varchar [null]
+  sort_order integer [null]
+  metadata json [null]
+  created_by bigint [ref: > users.id, null, note: 'on delete set null']
+  updated_by bigint [ref: > users.id, null, note: 'on delete set null']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (parent_key, sort_order)
+    (is_visible)
+  }
+}
+
+// NOTE: logs table removed - use audit_logs for comprehensive logging
+// logs table had varchar user (no FK) and simple structure
+// audit_logs provides better tracking with FKs, model tracking, and IP/user_agent
+
+Table notifications {
+  id uuid [pk]
+  type varchar
+  notifiable_type varchar
+  notifiable_id bigint
+  data text
+  read_at timestamp [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (notifiable_type, notifiable_id, read_at, created_at)
+    (notifiable_type, notifiable_id, type)
+  }
+}
+
+Table migrations {
+  id bigint [pk, increment]
+  migration varchar
+  batch integer
+}
+
+// ========================================
+// CQRS READ MODELS
+// ========================================
+// Read-optimized denormalized views for fast analytics queries
+// Updated via events/listeners when write models change
+
+// CQRS read model for test runs - denormalized for fast queries
+Table test_runs_view {
+  id bigint [pk, note: 'Same as test_runs.id - CQRS read model']
+  test_plan_id bigint [note: 'Denormalized from test_runs - no FK constraint (read model)']
+  test_plan_title varchar
+  project_id bigint [note: 'Denormalized from test_runs - no FK constraint (read model)']
+  project_title varchar
+  repository_id bigint [note: 'Denormalized from test_runs - no FK constraint (read model)']
+  repository_title varchar
+  title varchar
+  total_cases integer [default: 0]
+  passed_cases integer [default: 0]
+  failed_cases integer [default: 0]
+  skipped_cases integer [default: 0]
+  blocked_cases integer [default: 0]
+  execution_date date
+  execution_duration integer [null, note: 'seconds']
+  created_by_id bigint [null, note: 'Denormalized from test_runs - no FK constraint (read model)']
+  created_by_name varchar [null]
+  last_updated_at timestamp
+  
+  indexes {
+    (project_id, execution_date)
+    (test_plan_id, execution_date)
+    (repository_id, execution_date)
+    (execution_date)
+    (created_by_id)
+  }
+}
+
+// CQRS read model for bug budget - denormalized for fast queries
+Table bug_budget_view {
+  id bigint [pk, note: 'Same as bug_budget.id - CQRS read model']
+  jira_key varchar
+  project varchar [note: 'Denormalized from bug_budget - no FK constraint (read model)']
+  project_id bigint [null, note: 'Denormalized from bug_budget - no FK constraint (read model)']
+  summary text
+  status varchar
+  issue_type varchar
+  priority varchar
+  assignee_final varchar [note: 'Denormalized from bug_budget - no FK constraint (read model)']
+  assignee_id bigint [null, note: 'Denormalized from bug_budget - no FK constraint (read model)']
+  sprint varchar
+  status_category varchar
+  is_open boolean
+  created_date timestamp
+  resolved_date timestamp
+  // Denormalized from bug_budget_metadata
+  epic_name varchar [null]
+  service_feature varchar [null]
+  // Calculated fields
+  resolution_time_hours decimal(10,2) [null]
+  age_days integer [null]
+  last_updated_at timestamp
+  
+  indexes {
+    (project, status, is_open)
+    (project_id, status, is_open)
+    (assignee_final, status)
+    (assignee_id, status)
+    (sprint, status_category)
+    (created_date, resolved_date)
+    (epic_name)
+    (service_feature)
+  }
+}
+
+// ========================================
+// CHANGE DATA CAPTURE (CDC)
+// ========================================
+// Tracks all database changes for real-time sync and replication
+
+Table change_log {
+  id bigint [pk, increment]
+  table_name varchar
+  record_id bigint
+  change_type enum [note: 'insert, update, delete']
+  old_values json [null]
+  new_values json [null]
+  changed_at timestamp [default: 'CURRENT_TIMESTAMP']
+  changed_by bigint [ref: > users.id, null, note: 'on delete set null']
+  transaction_id varchar [null, note: 'For grouping related changes']
+  source varchar [null, note: 'api, web, cli, sync, etc.']
+  
+  indexes {
+    (table_name, record_id, changed_at)
+    (changed_at)
+    (change_type, changed_at)
+    (transaction_id)
+    (table_name, change_type, changed_at)
+  }
+}
+
+// ========================================
+// WORKFLOW & SAGA PATTERNS
+// ========================================
+// Complex multi-step workflow orchestration using saga pattern
+Table workflow_sagas {
+  id bigint [pk, increment]
+  saga_type varchar [note: 'test_execution, document_review, bug_triage']
+  current_step varchar
+  status enum [note: 'pending, in_progress, completed, failed, rolled_back']
+  context json [note: 'Saga state and intermediate data']
+  started_by bigint [ref: > users.id, null, note: 'on delete set null']
+  completed_at timestamp [null]
+  failed_at timestamp [null]
+  error_message text [null]
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (saga_type, status)
+    (started_by, status)
+    (status, created_at)
+  }
+}
+
+// ========================================
+// METADATA & EXTENSIBILITY
+// ========================================
+// Generic metadata table for custom fields, tags, labels without schema changes
+Table entity_metadata {
+  id bigint [pk, increment]
+  entity_type varchar [note: 'test_case, document, bug_budget, test_run, etc.']
+  entity_id bigint
+  meta_key varchar
+  meta_value text
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (entity_type, entity_id, meta_key) [unique]
+    (entity_type, entity_id)
+    (meta_key, meta_value)
+  }
+}
+
+// ========================================
+// CONTENT STORAGE & ARCHIVING
+// ========================================
+// Content-addressable storage for large content and archive tables
+
+// Content-addressable storage for large content fields
+// Benefits: Deduplication, faster queries (smaller row size), easy CDN integration, version control
+Table content_storage {
+  id bigint [pk, increment]
+  content_hash varchar(64) [unique, note: 'SHA-256 hash for deduplication']
+  content_type varchar [note: 'text, json, html, markdown']
+  content_size bigint [note: 'Size in bytes']
+  storage_path varchar [null, note: 'S3/object storage path if externalized']
+  content_data longtext [null, note: 'Actual content - can be null if externalized']
+  reference_count integer [default: 0, note: 'Number of entities referencing this content']
+  created_at timestamp
+  updated_at timestamp
+  
+  indexes {
+    (content_hash) [unique]
+    (content_type, content_size)
+    (reference_count)
+  }
+}
+
+// Archive table for audit_logs (records older than 2 years)
+// Partitioned by year for easy management
+Table audit_logs_archive {
+  id bigint [pk, increment]
+  user_id bigint [null, note: 'FK removed for archive - original user may be deleted']
+  action varchar
+  model_type varchar [null]
+  model_id bigint [null]
+  old_values json [null]
+  new_values json [null]
+  ip_address varchar [null]
+  user_agent varchar [null]
+  archived_at timestamp [note: 'When record was moved to archive']
+  original_created_at timestamp [note: 'Original created_at from audit_logs']
+  original_updated_at timestamp [note: 'Original updated_at from audit_logs']
+  
+  indexes {
+    (model_type, model_id, original_created_at)
+    (user_id, original_created_at)
+    (action, original_created_at)
+    (archived_at)
+  }
+}
+
+// Archive table for jira_table_history (records older than 1 year)
+// Partitioned by year for easy management
+// NOTE: This is a simplified version - full schema matches jira_table_history structure
+Table jira_table_history_archive {
+  id bigint [pk, increment]
+  issuekey varchar
+  project varchar [null]
+  issuetype varchar [null]
+  summary text [null]
+  description longtext [null]
+  raw_jira_data json [null]
+  synced_at timestamp [null]
+  archived_at timestamp [note: 'When record was moved to archive']
+  original_created_at timestamp [note: 'Original created_at from jira_table_history']
+  original_updated_at timestamp [note: 'Original updated_at from jira_table_history']
+  
+  indexes {
+    (project)
+    (issuetype)
+    (issuekey)
+    (synced_at)
+    (archived_at)
+  }
+}
+
