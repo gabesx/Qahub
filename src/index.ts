@@ -10,18 +10,66 @@ import { logger } from './shared/utils/logger';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const API_VERSION = process.env.API_VERSION || 'v1';
 
-// Middleware
-app.use(helmet());
-app.use(compression());
-app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || '*',
+// CORS configuration
+const corsOrigins = process.env.CORS_ORIGIN?.split(',').map(origin => origin.trim()) || ['*'];
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // If CORS_ORIGIN is '*', allow all origins
+    if (corsOrigins.includes('*')) {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (corsOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Also check for localhost variations
+    const normalizedOrigin = origin.replace('127.0.0.1', 'localhost');
+    if (corsOrigins.some(allowed => allowed.replace('127.0.0.1', 'localhost') === normalizedOrigin)) {
+      return callback(null, true);
+    }
+    
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Authorization'],
+};
+
+// Middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginEmbedderPolicy: false,
 }));
+app.use(compression());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Root endpoint - API information
+app.get('/', (req, res) => {
+  res.json({
+    message: 'QaHub API Server',
+    version: API_VERSION,
+    status: 'running',
+    endpoints: {
+      health: '/health',
+      api: `/api/${API_VERSION}`,
+      auth: `/api/${API_VERSION}/auth/login`,
+    },
+    documentation: 'See /api/v1 for API details',
+  });
+});
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
@@ -34,14 +82,45 @@ app.get('/health', async (req, res) => {
   });
 });
 
-// API routes placeholder
+// API routes
+import authRoutes from './api/routes/auth';
+import userRoutes from './api/routes/users';
+import tokenRoutes from './api/routes/tokens';
+
 app.get(`/api/${API_VERSION}`, (req, res) => {
   res.json({
     message: 'QaHub API',
     version: API_VERSION,
     status: 'running',
+    endpoints: {
+      auth: {
+        login: `POST /api/${API_VERSION}/auth/login`,
+        register: `POST /api/${API_VERSION}/users/register`,
+        verify: `GET /api/${API_VERSION}/auth/verify`,
+        forgotPassword: `POST /api/${API_VERSION}/auth/forgot-password`,
+        resetPassword: `POST /api/${API_VERSION}/auth/reset-password`,
+      },
+      users: {
+        me: `GET /api/${API_VERSION}/users/me`,
+        updateProfile: `PATCH /api/${API_VERSION}/users/me`,
+        changePassword: `POST /api/${API_VERSION}/users/change-password`,
+        list: `GET /api/${API_VERSION}/users`,
+        getById: `GET /api/${API_VERSION}/users/:id`,
+      },
+      tokens: {
+        create: `POST /api/${API_VERSION}/tokens`,
+        list: `GET /api/${API_VERSION}/tokens`,
+        getById: `GET /api/${API_VERSION}/tokens/:id`,
+        revoke: `DELETE /api/${API_VERSION}/tokens/:id`,
+        revokeAll: `DELETE /api/${API_VERSION}/tokens`,
+      },
+    },
   });
 });
+
+app.use(`/api/${API_VERSION}/auth`, authRoutes);
+app.use(`/api/${API_VERSION}/users`, userRoutes);
+app.use(`/api/${API_VERSION}/tokens`, tokenRoutes);
 
 // 404 handler
 app.use((req, res) => {

@@ -45,10 +45,16 @@ async function main() {
 
   console.log('✅ Created admin user:', admin.email);
 
+  // Set passwordChangedAt to current date (since we just created the password)
+  await prisma.user.update({
+    where: { id: admin.id },
+    data: { passwordChangedAt: new Date() },
+  });
+
   // Link admin to tenant
   await prisma.tenantUser.upsert({
     where: {
-      tenant_id_user_id: {
+      tenantId_userId: {
         tenantId: tenant.id,
         userId: admin.id,
       },

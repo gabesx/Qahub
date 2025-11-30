@@ -290,11 +290,35 @@ Full tenant isolation at the database level:
 
 ## 📚 API Documentation
 
-API endpoints will be available at:
-- Base URL: `http://localhost:3000/api/v1`
-- Health Check: `http://localhost:3000/health`
+Complete API documentation is available in [`docs/API_ENDPOINTS.md`](./docs/API_ENDPOINTS.md).
 
-API documentation will be available once routes are implemented.
+**Base URL:** `http://localhost:3001/api/v1`
+
+### Available Endpoints:
+
+**Authentication:**
+- `POST /auth/login` - User login
+- `GET /auth/verify` - Verify JWT token
+- `POST /auth/forgot-password` - Request password reset
+- `GET /auth/verify-reset-token` - Verify reset token
+- `POST /auth/reset-password` - Reset password
+
+**User Management:**
+- `POST /users/register` - Register new user
+- `GET /users/me` - Get current user profile
+- `PATCH /users/me` - Update user profile
+- `POST /users/change-password` - Change password
+- `GET /users` - List users (with pagination)
+- `GET /users/:id` - Get user by ID
+
+**Personal Access Tokens:**
+- `POST /tokens` - Create API token
+- `GET /tokens` - List user's tokens
+- `GET /tokens/:id` - Get token details
+- `DELETE /tokens/:id` - Revoke token
+- `DELETE /tokens` - Revoke all tokens
+
+See [`docs/API_ENDPOINTS.md`](./docs/API_ENDPOINTS.md) for detailed request/response formats, authentication requirements, and error codes.
 
 ## 🔒 Security
 
@@ -319,7 +343,15 @@ The database schema is defined in `prisma/schema.prisma` and includes:
 - **Bug Tracking**: Bug budget, Jira integration
 - **Analytics**: Summary tables, lead times, contributions
 
-See `schema.dbml` for the complete database design documentation.
+## 📖 Additional Documentation
+
+- [`docs/DEVELOPMENT_PLAN.md`](./docs/DEVELOPMENT_PLAN.md) - Complete development plan from User Management to Audit & Logging
+- [`docs/ERD.md`](./docs/ERD.md) - Entity Relationship Diagram (ERD) documentation
+- [`docs/API_ENDPOINTS.md`](./docs/API_ENDPOINTS.md) - Complete API endpoints documentation
+- [`apps/web/docs/CLIENT_VS_SERVER_COMPONENTS.md`](./apps/web/docs/CLIENT_VS_SERVER_COMPONENTS.md) - Next.js component architecture guide
+- [`schema.dbml`](./schema.dbml) - Complete database design documentation
+- [`document/QUICKSTART.md`](./document/QUICKSTART.md) - Quick start guide
+- [`DOCKER.md`](./DOCKER.md) - Docker setup and usage
 
 ## 🚧 Development Guidelines
 
@@ -429,3 +461,5 @@ For issues and questions, please open an issue on the repository.
 
 **Built with ❤️ using Node.js, TypeScript, PostgreSQL, and Prisma**
 
+Email: admin@qahub.com
+Password: admin123

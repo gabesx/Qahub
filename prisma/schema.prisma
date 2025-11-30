@@ -117,14 +117,16 @@ model User {
 }
 
 model PasswordReset {
-  email     String    @db.VarChar(255)
-  userId    BigInt?   @map("user_id") @db.BigInt
-  token     String    @unique @db.VarChar(255)
-  usedAt    DateTime? @map("used_at") @db.Timestamp
-  expiresAt DateTime? @map("expires_at") @db.Timestamp
-  createdAt DateTime? @map("created_at") @db.Timestamp
+  id         BigInt    @id @default(autoincrement()) @db.BigInt
+  email      String    @db.VarChar(255)
+  userId     BigInt?   @map("user_id") @db.BigInt
+  token      String    @unique @db.VarChar(255)
+  usedAt     DateTime? @map("used_at") @db.Timestamp
+  expiresAt  DateTime? @map("expires_at") @db.Timestamp
+  createdAt  DateTime? @map("created_at") @db.Timestamp
 
-  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passwordHistory PasswordHistory[]
 
   @@index([email])
   @@index([userId])
@@ -162,13 +164,14 @@ model PersonalAccessToken {
 }
 
 model PasswordHistory {
-  id              BigInt   @id @default(autoincrement()) @db.BigInt
-  userId          BigInt   @map("user_id") @db.BigInt
-  passwordHash    String   @map("password_hash") @db.VarChar(255)
-  passwordResetId BigInt?  @map("password_reset_id") @db.BigInt
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamp
+  id              BigInt        @id @default(autoincrement()) @db.BigInt
+  userId          BigInt        @map("user_id") @db.BigInt
+  passwordHash    String        @map("password_hash") @db.VarChar(255)
+  passwordResetId BigInt?       @map("password_reset_id") @db.BigInt
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamp
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passwordReset   PasswordReset? @relation(fields: [passwordResetId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([passwordResetId])
