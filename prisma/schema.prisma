@@ -47,11 +47,12 @@ model Tenant {
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamp
   updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamp
 
-  tenantUsers  TenantUser[]
-  projects     Project[]
-  repositories Repository[]
-  testCases    TestCase[]
-  documents    Document[]
+  tenantUsers     TenantUser[]
+  projects        Project[]
+  repositories    Repository[]
+  testCases       TestCase[]
+  documents       Document[]
+  userInvitations UserInvitation[]
 
   @@index([slug])
   @@index([domain])
@@ -99,6 +100,7 @@ model User {
   password          String    @db.VarChar(255)
   jobRole           String?   @map("job_role") @db.VarChar(100)
   rememberToken     String?   @map("remember_token") @db.VarChar(100)
+  preferences       Json?     @map("preferences")
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamp
 
@@ -110,6 +112,8 @@ model User {
   userPermissions      UserPermission[]
   createdProjects      Project[]             @relation("ProjectCreator")
   updatedProjects      Project[]             @relation("ProjectUpdater")
+  auditLogs            AuditLog[]
+  sentInvitations      UserInvitation[]       @relation("UserInvitations")
 
   @@index([email])
   @@index([googleId])
@@ -176,6 +180,29 @@ model PasswordHistory {
   @@index([userId, createdAt])
   @@index([passwordResetId])
   @@map("password_history")
+}
+
+model UserInvitation {
+  id         BigInt    @id @default(autoincrement()) @db.BigInt
+  email      String    @db.VarChar(255)
+  token      String    @unique @db.VarChar(255)
+  tenantId   BigInt?   @map("tenant_id") @db.BigInt
+  invitedBy  BigInt    @map("invited_by") @db.BigInt
+  role       String?   @default("member") @db.VarChar(50)
+  acceptedAt DateTime? @map("accepted_at") @db.Timestamp
+  expiresAt  DateTime  @map("expires_at") @db.Timestamp
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inviter  User    @relation("UserInvitations", fields: [invitedBy], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([token])
+  @@index([tenantId])
+  @@index([invitedBy])
+  @@index([expiresAt, acceptedAt])
+  @@map("user_invitations")
 }
 
 // ========================================
@@ -730,6 +757,31 @@ model ContentStorage {
   @@index([contentType, contentSize])
   @@index([referenceCount])
   @@map("content_storage")
+}
+
+// ========================================
+// AUDIT & LOGGING
+// ========================================
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement()) @db.BigInt
+  userId     BigInt?  @map("user_id") @db.BigInt
+  action     String   @db.VarChar(255)
+  modelType  String?  @map("model_type") @db.VarChar(255)
+  modelId    BigInt?  @map("model_id") @db.BigInt
+  oldValues  Json?    @map("old_values")
+  newValues  Json?    @map("new_values")
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  userAgent  String?  @map("user_agent") @db.VarChar(500)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([modelType, modelId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
 }
 
 // Note: Additional tables like DocumentTemplate, EditorImage, etc. can be added as needed

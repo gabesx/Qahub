@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import AppHeader from '../components/AppHeader'
 import { api } from '../../lib/api'
 
 interface User {
@@ -92,57 +93,9 @@ export default function UsersPage() {
     setPagination(prev => ({ ...prev, page: newPage }))
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('rememberMe')
-    router.push('/')
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-6">
-              <Link href="/dashboard" className="flex items-center">
-                <div className="w-10 h-10 bg-primary-600 rounded-full flex items-center justify-center mr-3">
-                  <span className="text-white text-lg font-bold">Q</span>
-                </div>
-                <h1 className="text-xl font-bold text-gray-800">QaHub</h1>
-              </Link>
-              <nav className="flex space-x-4">
-                <Link
-                  href="/dashboard"
-                  className="text-sm text-gray-600 hover:text-gray-800 px-3 py-2 rounded-md"
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  href="/users"
-                  className="text-sm text-primary-600 font-medium px-3 py-2 rounded-md bg-primary-50"
-                >
-                  Users
-                </Link>
-                <Link
-                  href="/profile"
-                  className="text-sm text-gray-600 hover:text-gray-800 px-3 py-2 rounded-md"
-                >
-                  Profile
-                </Link>
-              </nav>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={handleLogout}
-                className="text-sm text-gray-600 hover:text-gray-800"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

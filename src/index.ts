@@ -56,6 +56,10 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve static files (avatars, uploads)
+const uploadDir = process.env.UPLOAD_DIR || 'uploads';
+app.use('/uploads', express.static(uploadDir));
+
 // Root endpoint - API information
 app.get('/', (req, res) => {
   res.json({
@@ -86,6 +90,7 @@ app.get('/health', async (req, res) => {
 import authRoutes from './api/routes/auth';
 import userRoutes from './api/routes/users';
 import tokenRoutes from './api/routes/tokens';
+import invitationRoutes from './api/routes/invitations';
 
 app.get(`/api/${API_VERSION}`, (req, res) => {
   res.json({
@@ -121,6 +126,7 @@ app.get(`/api/${API_VERSION}`, (req, res) => {
 app.use(`/api/${API_VERSION}/auth`, authRoutes);
 app.use(`/api/${API_VERSION}/users`, userRoutes);
 app.use(`/api/${API_VERSION}/tokens`, tokenRoutes);
+app.use(`/api/${API_VERSION}/invitations`, invitationRoutes);
 
 // 404 handler
 app.use((req, res) => {

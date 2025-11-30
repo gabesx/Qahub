@@ -29,27 +29,34 @@ async function main() {
 
   // Create admin user
   const hashedPassword = await bcrypt.hash('admin123', 12);
+  const now = new Date();
+  
   const admin = await prisma.user.upsert({
     where: { email: 'admin@qahub.com' },
-    update: {},
+    update: {
+      // Update fields if user already exists to ensure they have correct values
+      name: 'Admin User',
+      password: hashedPassword,
+      authProvider: 'email',
+      isActive: true,
+      emailVerifiedAt: now,
+      role: 'admin',
+      passwordChangedAt: now,
+      // Don't update lastLoginAt if it's already set (preserve login history)
+    },
     create: {
       name: 'Admin User',
       email: 'admin@qahub.com',
       password: hashedPassword,
       authProvider: 'email',
       isActive: true,
-      emailVerifiedAt: new Date(),
+      emailVerifiedAt: now,
       role: 'admin',
+      passwordChangedAt: now,
     },
   });
 
-  console.log('✅ Created admin user:', admin.email);
-
-  // Set passwordChangedAt to current date (since we just created the password)
-  await prisma.user.update({
-    where: { id: admin.id },
-    data: { passwordChangedAt: new Date() },
-  });
+  console.log('✅ Created/Updated admin user:', admin.email);
 
   // Link admin to tenant
   await prisma.tenantUser.upsert({

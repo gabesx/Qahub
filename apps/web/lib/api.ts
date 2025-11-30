@@ -17,6 +17,10 @@ api.interceptors.request.use((config) => {
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Don't set Content-Type for FormData (let browser set it with boundary)
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
   }
   return config;
 });
@@ -26,8 +30,17 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('token');
-      window.location.href = '/';
+      // Don't auto-redirect on password change endpoint - let the component handle it
+      const isPasswordChange = error.config?.url?.includes('/change-password');
+      
+      if (!isPasswordChange) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('rememberMe');
+        // Store error message for login page
+        const errorMessage = error.response?.data?.error?.message || 'Your session has expired. Please log in again.';
+        localStorage.setItem('loginError', errorMessage);
+        window.location.href = '/';
+      }
     }
     return Promise.reject(error);
   }

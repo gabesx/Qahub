@@ -12,12 +12,13 @@ const router = Router();
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z.string().min(1, 'Password is required'),
+  rememberMe: z.boolean().optional().default(false),
 });
 
 // Login endpoint
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = loginSchema.parse(req.body);
+    const { email, password, rememberMe } = loginSchema.parse(req.body);
 
     // Find user by email
     const user = await prisma.user.findUnique({
@@ -78,16 +79,46 @@ router.post('/login', async (req, res) => {
       }
     );
 
-    // Update last login
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
+    // Generate remember token if "Remember Me" is checked
+    let rememberToken = null;
+    if (rememberMe) {
+      rememberToken = crypto.randomBytes(32).toString('hex');
+      const hashedRememberToken = crypto.createHash('sha256').update(rememberToken).digest('hex');
+      
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { 
+          lastLoginAt: new Date(),
+          rememberToken: hashedRememberToken,
+        },
+      });
+    } else {
+      // Clear remember token if not checked
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { 
+          lastLoginAt: new Date(),
+          rememberToken: null,
+        },
+      });
+    }
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'logged_in',
+        modelType: 'user',
+        modelId: user.id,
+        ipAddress: req.ip || req.socket.remoteAddress || null,
+        userAgent: req.get('user-agent') || null,
+      },
     });
 
     logger.info(`User logged in: ${user.email}`);
 
     // Return success response
-    res.json({
+    const response: any = {
       data: {
         user: {
           id: user.id.toString(),
@@ -106,7 +137,19 @@ router.post('/login', async (req, res) => {
           : null,
         token,
       },
-    });
+    };
+
+    // Set remember token cookie if "Remember Me" is checked
+    if (rememberToken) {
+      res.cookie('remember_token', rememberToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+    }
+
+    res.json(response);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({
@@ -481,6 +524,7 @@ router.post('/reset-password', async (req, res) => {
     });
 
     // Revoke all personal access tokens (security best practice)
+    // Note: For password reset via email, we revoke ALL tokens since user is not logged in
     await prisma.personalAccessToken.updateMany({
       where: {
         tokenableType: 'User',
@@ -514,6 +558,163 @@ router.post('/reset-password', async (req, res) => {
       error: {
         code: 'INTERNAL_SERVER_ERROR',
         message: 'An error occurred while resetting your password',
+      },
+    });
+  }
+});
+
+// Email verification endpoints
+const verifyEmailSchema = z.object({
+  token: z.string().min(1, 'Verification token is required'),
+});
+
+// Verify email address
+router.post('/verify-email', async (req, res) => {
+  try {
+    const { token } = verifyEmailSchema.parse(req.body);
+
+    // Find verification token (using password_resets table for now, or create separate table)
+    const passwordReset = await prisma.passwordReset.findUnique({
+      where: { token },
+      include: { user: true },
+    });
+
+    if (!passwordReset || !passwordReset.user) {
+      return res.status(404).json({
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Invalid or expired verification token',
+        },
+      });
+    }
+
+    // Check if token has expired (24 hours for email verification)
+    const tokenAge = passwordReset.createdAt 
+      ? new Date().getTime() - new Date(passwordReset.createdAt).getTime()
+      : Infinity;
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+    if (tokenAge > maxAge) {
+      return res.status(400).json({
+        error: {
+          code: 'TOKEN_EXPIRED',
+          message: 'This verification token has expired',
+        },
+      });
+    }
+
+    // Check if already verified
+    if (passwordReset.user.emailVerifiedAt) {
+      return res.status(400).json({
+        error: {
+          code: 'ALREADY_VERIFIED',
+          message: 'Email address is already verified',
+        },
+      });
+    }
+
+    // Mark email as verified
+    await prisma.user.update({
+      where: { id: passwordReset.user.id },
+      data: { emailVerifiedAt: new Date() },
+    });
+
+    // Mark token as used
+    await prisma.passwordReset.update({
+      where: { token },
+      data: { usedAt: new Date() },
+    });
+
+    logger.info(`Email verified for user: ${passwordReset.user.email}`);
+
+    res.json({
+      message: 'Email address verified successfully',
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid input',
+          details: error.errors,
+        },
+      });
+    }
+
+    logger.error('Verify email error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred during email verification',
+      },
+    });
+  }
+});
+
+// Resend verification email
+router.post('/resend-verification', async (req, res) => {
+  try {
+    const { email } = z.object({ email: z.string().email() }).parse(req.body);
+
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
+
+    if (!user) {
+      // Don't reveal if user exists for security
+      return res.json({
+        message: 'If an account exists with this email, a verification link has been sent',
+      });
+    }
+
+    if (user.emailVerifiedAt) {
+      return res.status(400).json({
+        error: {
+          code: 'ALREADY_VERIFIED',
+          message: 'Email address is already verified',
+        },
+      });
+    }
+
+    // Generate verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24); // 24 hours
+
+    // Store token (reuse password_resets table for email verification)
+    await prisma.passwordReset.create({
+      data: {
+        email: user.email,
+        userId: user.id,
+        token: verificationToken,
+        expiresAt,
+      },
+    });
+
+    // Send verification email
+    await emailService.sendVerificationEmail(user.email, verificationToken, user.name);
+
+    logger.info(`Verification email resent to: ${user.email}`);
+
+    res.json({
+      message: 'If an account exists with this email, a verification link has been sent',
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid email address',
+          details: error.errors,
+        },
+      });
+    }
+
+    logger.error('Resend verification error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while sending verification email',
       },
     });
   }

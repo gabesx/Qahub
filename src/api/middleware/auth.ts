@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { prisma } from '../../shared/infrastructure/database';
 import { logger } from '../../shared/utils/logger';
 
@@ -65,6 +66,30 @@ export const authenticateToken = async (
       email: decoded.email,
       tenantId: decoded.tenantId,
     };
+
+    // Track token usage for personal access tokens (if using PAT instead of JWT)
+    // Note: This is for PATs, JWT tokens don't need usage tracking
+    // But we can track JWT usage by storing in a session table if needed
+    // For now, we'll track PAT usage when token hash matches
+    try {
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      await prisma.personalAccessToken.updateMany({
+        where: {
+          tokenHash,
+          tokenableType: 'User',
+          tokenableId: BigInt(decoded.userId),
+          revokedAt: null,
+        },
+        data: {
+          lastUsedAt: new Date(),
+          lastUsedIp: req.ip || req.socket.remoteAddress || null,
+          lastUsedUserAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (trackError) {
+      // Don't fail the request if tracking fails
+      logger.debug('Token usage tracking failed:', trackError);
+    }
 
     next();
   } catch (error) {
