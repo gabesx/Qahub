@@ -5,13 +5,9 @@ import compression from 'compression';
 import dotenv from 'dotenv';
 import { checkDatabaseConnection, disconnectDatabase } from './shared/infrastructure/database';
 import { logger } from './shared/utils/logger';
-import { initializeReadModelListeners } from './shared/events/read-model-listeners';
 
 // Load environment variables
 dotenv.config();
-
-// Initialize event listeners for read models (must be done before routes)
-initializeReadModelListeners();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -112,25 +108,6 @@ import documentCommentRoutes from './api/routes/document-comments';
 import documentEngagementRoutes from './api/routes/document-engagements';
 import documentTemplateRoutes from './api/routes/document-templates';
 import editorImageRoutes from './api/routes/editor-images';
-import analyticsRoutes from './api/routes/analytics';
-import menuVisibilityRoutes from './api/routes/menu-visibilities';
-import notificationRoutes from './api/routes/notifications';
-import notificationSSERoutes from './api/routes/notifications-sse';
-import settingRoutes from './api/routes/settings';
-import testRunsViewRoutes from './api/routes/test-runs-view';
-import bugBudgetRoutes from './api/routes/bug-budget';
-import bugBudgetMetadataRoutes from './api/routes/bug-budget-metadata';
-import jiraFieldRoutes from './api/routes/jira-fields';
-import jobsRoutes from './api/routes/jobs';
-import changeLogRoutes from './api/routes/change-logs';
-import decisionLogRoutes from './api/routes/decision-logs';
-import entityMetadataRoutes from './api/routes/entity-metadata';
-import prdReviewRoutes from './api/routes/prd-reviews';
-import auditEventRoutes from './api/routes/audit-events';
-import archiveRoutes from './api/routes/archive';
-import analyticsIntegrationsRoutes from './api/routes/analytics-integrations';
-import workflowSagaRoutes from './api/routes/workflow-sagas';
-import bugBudgetViewRoutes from './api/routes/bug-budget-view';
 
 app.get(`/api/${API_VERSION}`, (req, res) => {
   res.json({
@@ -282,141 +259,6 @@ app.get(`/api/${API_VERSION}`, (req, res) => {
         upload: `POST /api/${API_VERSION}/editor/images`,
         delete: `DELETE /api/${API_VERSION}/editor/images/:imageId`,
       },
-      analytics: {
-        testExecution: `GET /api/${API_VERSION}/projects/:projectId/analytics/test-execution`,
-        bugs: `GET /api/${API_VERSION}/projects/:projectId/analytics/bugs`,
-        testCases: `GET /api/${API_VERSION}/projects/:projectId/repositories/:repositoryId/analytics/test-cases`,
-      },
-      menuVisibilities: {
-        list: `GET /api/${API_VERSION}/menu-visibilities`,
-        getByKey: `GET /api/${API_VERSION}/menu-visibilities/:menuKey`,
-        getTree: `GET /api/${API_VERSION}/menu-visibilities/tree`,
-        create: `POST /api/${API_VERSION}/menu-visibilities`,
-        update: `PATCH /api/${API_VERSION}/menu-visibilities/:menuKey`,
-        bulkUpdate: `PATCH /api/${API_VERSION}/menu-visibilities/bulk`,
-        delete: `DELETE /api/${API_VERSION}/menu-visibilities/:menuKey`,
-      },
-      notifications: {
-        list: `GET /api/${API_VERSION}/notifications`,
-        getById: `GET /api/${API_VERSION}/notifications/:id`,
-        getStats: `GET /api/${API_VERSION}/notifications/stats`,
-        create: `POST /api/${API_VERSION}/notifications`,
-        update: `PATCH /api/${API_VERSION}/notifications/:id`,
-        markAllRead: `POST /api/${API_VERSION}/notifications/mark-all-read`,
-        bulkDelete: `DELETE /api/${API_VERSION}/notifications/bulk`,
-        delete: `DELETE /api/${API_VERSION}/notifications/:id`,
-        stream: `GET /api/${API_VERSION}/notifications/stream` + ' (SSE - Server-Sent Events)',
-        connections: `GET /api/${API_VERSION}/notifications/stream/connections`,
-      },
-      settings: {
-        list: `GET /api/${API_VERSION}/settings`,
-        getByKey: `GET /api/${API_VERSION}/settings/:key`,
-        getByCategory: `GET /api/${API_VERSION}/settings/category/:category`,
-        create: `POST /api/${API_VERSION}/settings`,
-        update: `PATCH /api/${API_VERSION}/settings/:key`,
-        bulkUpdate: `PATCH /api/${API_VERSION}/settings/bulk`,
-        delete: `DELETE /api/${API_VERSION}/settings/:key`,
-      },
-      testRunsView: {
-        list: `GET /api/${API_VERSION}/test-runs-view`,
-        getById: `GET /api/${API_VERSION}/test-runs-view/:id`,
-      },
-      bugBudget: {
-        list: `GET /api/${API_VERSION}/bug-budget`,
-        getById: `GET /api/${API_VERSION}/bug-budget/:id`,
-        create: `POST /api/${API_VERSION}/bug-budget`,
-        update: `PATCH /api/${API_VERSION}/bug-budget/:id`,
-        delete: `DELETE /api/${API_VERSION}/bug-budget/:id`,
-        metadata: {
-          get: `GET /api/${API_VERSION}/bug-budget/:id/metadata`,
-          update: `PUT /api/${API_VERSION}/bug-budget/:id/metadata`,
-        },
-      },
-      jiraFields: {
-        list: `GET /api/${API_VERSION}/jira-fields`,
-        getById: `GET /api/${API_VERSION}/jira-fields/:id`,
-        create: `POST /api/${API_VERSION}/jira-fields`,
-        update: `PATCH /api/${API_VERSION}/jira-fields/:id`,
-        delete: `DELETE /api/${API_VERSION}/jira-fields/:id`,
-      },
-      jobs: {
-        populateAnalytics: `POST /api/${API_VERSION}/jobs/populate-analytics`,
-        updateTestRunsView: `POST /api/${API_VERSION}/jobs/update-test-runs-view`,
-      },
-      changeLogs: {
-        list: `GET /api/${API_VERSION}/change-logs`,
-        getById: `GET /api/${API_VERSION}/change-logs/:id`,
-        getRecordHistory: `GET /api/${API_VERSION}/change-logs/table/:tableName/record/:recordId`,
-        statistics: `GET /api/${API_VERSION}/change-logs/statistics/summary`,
-      },
-      decisionLogs: {
-        list: `GET /api/${API_VERSION}/decision-logs`,
-        getById: `GET /api/${API_VERSION}/decision-logs/:id`,
-        create: `POST /api/${API_VERSION}/decision-logs`,
-        update: `PATCH /api/${API_VERSION}/decision-logs/:id`,
-        delete: `DELETE /api/${API_VERSION}/decision-logs/:id`,
-      },
-      entityMetadata: {
-        list: `GET /api/${API_VERSION}/entity-metadata`,
-        getById: `GET /api/${API_VERSION}/entity-metadata/:id`,
-        getByEntity: `GET /api/${API_VERSION}/entity-metadata/entity/:entityType/:entityId`,
-        create: `POST /api/${API_VERSION}/entity-metadata`,
-        update: `PATCH /api/${API_VERSION}/entity-metadata/:id`,
-        bulkUpdate: `PUT /api/${API_VERSION}/entity-metadata/entity/:entityType/:entityId/bulk`,
-        delete: `DELETE /api/${API_VERSION}/entity-metadata/:id`,
-        deleteByEntity: `DELETE /api/${API_VERSION}/entity-metadata/entity/:entityType/:entityId`,
-      },
-      prdReviews: {
-        healthCheck: `GET /api/${API_VERSION}/prd-reviews/health-check`,
-        testReview: `POST /api/${API_VERSION}/prd-reviews/test-review`,
-        statistics: `GET /api/${API_VERSION}/prd-reviews/statistics`,
-        list: `GET /api/${API_VERSION}/prd-reviews`,
-        getById: `GET /api/${API_VERSION}/prd-reviews/:id`,
-        create: `POST /api/${API_VERSION}/prd-reviews`,
-        update: `PATCH /api/${API_VERSION}/prd-reviews/:id`,
-        sync: `POST /api/${API_VERSION}/prd-reviews/sync`,
-        backgroundSync: `POST /api/${API_VERSION}/prd-reviews/background-sync`,
-      },
-      auditEvents: {
-        list: `GET /api/${API_VERSION}/audit-events`,
-        getById: `GET /api/${API_VERSION}/audit-events/:id`,
-        getByAggregate: `GET /api/${API_VERSION}/audit-events/aggregate/:aggregateType/:aggregateId`,
-        create: `POST /api/${API_VERSION}/audit-events`,
-      },
-      archive: {
-        auditLogs: {
-          list: `GET /api/${API_VERSION}/archive/audit-logs`,
-          getById: `GET /api/${API_VERSION}/archive/audit-logs/:id`,
-        },
-        jiraHistory: {
-          list: `GET /api/${API_VERSION}/archive/jira-history`,
-          getById: `GET /api/${API_VERSION}/archive/jira-history/:id`,
-        },
-      },
-      analytics: {
-        allureReports: {
-          list: `GET /api/${API_VERSION}/analytics/allure-reports`,
-          create: `POST /api/${API_VERSION}/analytics/allure-reports`,
-        },
-        gitlab: {
-          mrLeadTimes: `GET /api/${API_VERSION}/analytics/gitlab/mr-lead-times`,
-          contributors: `GET /api/${API_VERSION}/analytics/gitlab/contributors`,
-        },
-        jira: {
-          leadTimes: `GET /api/${API_VERSION}/analytics/jira/lead-times`,
-        },
-        monthlyContributions: `GET /api/${API_VERSION}/analytics/monthly-contributions`,
-      },
-      workflowSagas: {
-        list: `GET /api/${API_VERSION}/workflow-sagas`,
-        getById: `GET /api/${API_VERSION}/workflow-sagas/:id`,
-        create: `POST /api/${API_VERSION}/workflow-sagas`,
-        update: `PATCH /api/${API_VERSION}/workflow-sagas/:id`,
-      },
-      bugBudgetView: {
-        list: `GET /api/${API_VERSION}/bug-budget-view`,
-        getById: `GET /api/${API_VERSION}/bug-budget-view/:id`,
-      },
     },
   });
 });
@@ -442,25 +284,6 @@ app.use(`/api/${API_VERSION}`, documentCommentRoutes);
 app.use(`/api/${API_VERSION}`, documentEngagementRoutes);
 app.use(`/api/${API_VERSION}`, documentTemplateRoutes);
 app.use(`/api/${API_VERSION}`, editorImageRoutes);
-app.use(`/api/${API_VERSION}`, analyticsRoutes);
-app.use(`/api/${API_VERSION}`, menuVisibilityRoutes);
-app.use(`/api/${API_VERSION}`, notificationRoutes);
-app.use(`/api/${API_VERSION}`, notificationSSERoutes);
-app.use(`/api/${API_VERSION}`, settingRoutes);
-app.use(`/api/${API_VERSION}`, testRunsViewRoutes);
-app.use(`/api/${API_VERSION}`, bugBudgetRoutes);
-app.use(`/api/${API_VERSION}`, bugBudgetMetadataRoutes);
-app.use(`/api/${API_VERSION}`, jiraFieldRoutes);
-app.use(`/api/${API_VERSION}`, jobsRoutes);
-app.use(`/api/${API_VERSION}`, changeLogRoutes);
-app.use(`/api/${API_VERSION}`, decisionLogRoutes);
-app.use(`/api/${API_VERSION}`, entityMetadataRoutes);
-app.use(`/api/${API_VERSION}/prd-reviews`, prdReviewRoutes);
-app.use(`/api/${API_VERSION}`, auditEventRoutes);
-app.use(`/api/${API_VERSION}`, archiveRoutes);
-app.use(`/api/${API_VERSION}/analytics`, analyticsIntegrationsRoutes);
-app.use(`/api/${API_VERSION}`, workflowSagaRoutes);
-app.use(`/api/${API_VERSION}`, bugBudgetViewRoutes);
 
 // 404 handler
 app.use((req, res) => {

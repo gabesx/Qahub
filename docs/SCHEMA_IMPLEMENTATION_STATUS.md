@@ -36,15 +36,10 @@ This document tracks what has been implemented from the `schema.dbml` file versu
 - ✅ `user_invitations` - User invitation system
 - ✅ **API Routes**: `/invitations/*`
 
-### 6. AUDIT & LOGGING ✅
+### 6. AUDIT & LOGGING (Partial)
 - ✅ `audit_logs` - Model exists and is used in some operations
-- ✅ `audit_events` - Event sourcing table implemented
-  - **API Routes**: `/audit-events/*` (list, get by ID, get by aggregate, create)
-  - **Features**: Time-travel queries, event replay, automatic logging from domain events
-  - **Integration**: Automatically logs all domain events to audit_events table
-- ✅ `decision_logs` - Decision logging implemented
-  - **API Routes**: `/decision-logs/*` (full CRUD with filtering and search)
-  - **Features**: Filter by decision type, status, owner, date range, full-text search
+- ❌ `audit_events` - Event sourcing table not implemented
+- ❌ `decision_logs` - Decision logging not implemented
 
 ---
 
@@ -82,138 +77,77 @@ This document tracks what has been implemented from the `schema.dbml` file versu
 - ✅ `editor_images` - Editor image uploads
 - ✅ **API Routes**: `/projects/:projectId/documents/*`, `/documents/:documentId/versions/*`, `/documents/:documentId/comments/*`, `/documents/:documentId/engagements/*`, `/document-templates/*`, `/editor/images/*`
 
-### 4. PRD REVIEW & REQUIREMENTS ✅
-**Models exist in Prisma:**
-- ✅ `prd_reviews` - PRD review management
-- ✅ `prd_review_cache` - PRD review caching
+### 4. PRD REVIEW & REQUIREMENTS
+**Models NOT in Prisma schema:**
+- ❌ `prd_reviews` - PRD review management
+- ❌ `prd_review_cache` - PRD review caching
 
-**API Routes:**
-- ✅ `GET /api/v1/projects/:projectId/prd-reviews` - List PRD reviews with filtering and search
-- ✅ `GET /api/v1/projects/:projectId/prd-reviews/:id` - Get specific PRD review
-- ✅ `POST /api/v1/projects/:projectId/prd-reviews` - Create new PRD review
-- ✅ `PATCH /api/v1/projects/:projectId/prd-reviews/:id` - Update PRD review
-- ✅ `DELETE /api/v1/projects/:projectId/prd-reviews/:id` - Delete PRD review
-- ✅ `POST /api/v1/projects/:projectId/prd-reviews/:id/cache` - Create/update cache
-- ✅ `DELETE /api/v1/projects/:projectId/prd-reviews/:id/cache/:cacheKey` - Delete cache
+**Missing Implementation:**
+- Models need to be added to Prisma schema
+- Full CRUD API routes needed
 
-**Features:**
-- Review workflow (draft → review → approved → rejected)
-- Automatic reviewed_at timestamp when status changes
-- Cache management for computed data
-- Full-text search (title, content, comments)
-- Filtering by status, reviewer, date range
+### 5. BUG TRACKING & ISSUE MANAGEMENT
+**Models NOT in Prisma schema:**
+- ❌ `bug_budget` - Core bug tracking
+- ❌ `bug_budget_metadata` - Extended bug metadata
+- ❌ `jira_table_history` - Jira sync history
+- ❌ `jira_fields` - Jira field definitions
 
-### 5. BUG TRACKING & ISSUE MANAGEMENT ✅
-**Models exist in Prisma:**
-- ✅ `bug_budget` - Core bug tracking
-- ✅ `bug_budget_metadata` - Extended bug metadata
-- ✅ `jira_table_history` - Jira sync history
-- ✅ `jira_fields` - Jira field definitions
-- ✅ **API Routes**: `/bug-budget/*`, `/bug-budget/:id/metadata`, `/jira-fields/*`
-- ⚠️ Jira integration/sync functionality - To be implemented separately
+**Missing Implementation:**
+- Models need to be added to Prisma schema
+- Full CRUD API routes needed
+- Jira integration/sync functionality
 
-### 6. ANALYTICS & REPORTING ✅
-**Models exist in Prisma:**
-- ✅ `allure_report` - Allure test reports
-- ✅ `allure_scenarios` - Allure scenarios
-- ✅ `allure_steps` - Allure test steps
-- ✅ `gitlab_mr_lead_times` - GitLab merge request metrics
-- ✅ `gitlab_mr_contributors` - GitLab contributor metrics
-- ✅ `jira_lead_times` - Jira issue lead times
-- ✅ `monthly_contributions` - Monthly contribution tracking
+### 6. ANALYTICS & REPORTING
+**Models NOT in Prisma schema:**
+- ❌ `allure_report` - Allure test reports
+- ❌ `allure_scenarios` - Allure scenarios
+- ❌ `allure_steps` - Allure test steps
+- ❌ `gitlab_mr_lead_times` - GitLab merge request metrics
+- ❌ `gitlab_mr_contributors` - GitLab contributor metrics
+- ❌ `jira_lead_times` - Jira issue lead times
+- ❌ `monthly_contributions` - Monthly contribution tracking
 
-**API Routes:**
-- ✅ `GET /api/v1/analytics/allure-reports` - List Allure reports
-- ✅ `POST /api/v1/analytics/allure-reports` - Create Allure report
-- ✅ `GET /api/v1/analytics/gitlab/mr-lead-times` - List GitLab MR lead times
-- ✅ `GET /api/v1/analytics/gitlab/contributors` - List GitLab contributors
-- ✅ `GET /api/v1/analytics/jira/lead-times` - List Jira lead times
-- ✅ `GET /api/v1/analytics/monthly-contributions` - List monthly contributions
+**Missing Implementation:**
+- Models need to be added to Prisma schema
+- API routes for viewing/uploading reports
+- Integration with external systems (Allure, GitLab, Jira)
 
-**Features:**
-- Full CRUD for Allure reports with scenarios and steps
-- GitLab MR lead time tracking and analysis
-- GitLab contributor metrics
-- Jira lead time tracking linked to bug budgets
-- Monthly contribution aggregation (MRs, approvals, pushes)
-- Comprehensive filtering and pagination
-- ⚠️ Integration jobs/sync functionality - To be implemented separately (external sync jobs)
+### 7. ANALYTICS SUMMARY TABLES
+**Models NOT in Prisma schema:**
+- ❌ `test_execution_summary` - Pre-aggregated test execution data
+- ❌ `bug_analytics_daily` - Daily bug analytics
+- ❌ `test_case_analytics` - Test case analytics
 
-### 7. ANALYTICS SUMMARY TABLES ✅
-**Models exist in Prisma:**
-- ✅ `test_execution_summary` - Pre-aggregated test execution data
-- ✅ `bug_analytics_daily` - Daily bug analytics
-- ✅ `test_case_analytics` - Test case analytics
-- ✅ **API Routes**: `/projects/:projectId/analytics/*` (read-only endpoints)
-- ✅ **Jobs**: `populate-analytics-summaries.ts` - Functions to populate summary tables
-- ✅ **Job API**: `/jobs/populate-analytics` - Manual trigger endpoint
-- ⚠️ Scheduled jobs (cron) - To be configured separately (use job API or external scheduler)
+**Missing Implementation:**
+- Models need to be added to Prisma schema
+- Scheduled jobs to populate summary tables
+- API routes for analytics dashboards
 
-### 8. SYSTEM CONFIGURATION ✅
-**Models exist in Prisma:**
-- ✅ `menu_visibilities` - Menu visibility settings
-- ✅ `notifications` - Notification system
-- ✅ `settings` - System settings
-- ✅ **API Routes**: `/menu-visibilities/*`, `/notifications/*`, `/settings/*`
-- ✅ **Enhanced Features**:
-  - Bulk operations for settings and menu visibilities
-  - Menu visibility tree/hierarchy endpoint
-  - Notification statistics endpoint
-  - Settings by category endpoint
-  - Bulk delete notifications
-- ✅ **Real-time Notification System**: Server-Sent Events (SSE) implementation
-  - `GET /api/v1/notifications/stream` - SSE endpoint for real-time notifications
-  - `GET /api/v1/notifications/stream/connections` - Connection monitoring
-  - Automatic broadcasting when notifications are created/updated/deleted
-  - Real-time stats updates
-  - Connection management and heartbeat (30s interval)
-  - Initial data push (recent notifications and stats)
-  - See `docs/REALTIME_NOTIFICATIONS.md` for detailed documentation
+### 8. SYSTEM CONFIGURATION
+**Models NOT in Prisma schema:**
+- ❌ `menu_visibilities` - Menu visibility settings
+- ❌ `notifications` - Notification system
+- ⚠️ `settings` - Model exists but no API routes
 
-### 9. CQRS READ MODELS ✅
-**Models exist in Prisma:**
-- ✅ `test_runs_view` - Denormalized test runs view
-- ✅ `bug_budget_view` - Denormalized bug budget view
-- ✅ **API Routes**: `/test-runs-view/*` (read-only endpoints)
-- ✅ **Jobs**: `update-test-runs-view.ts` - Functions to update read model
-- ✅ **Event-Driven Updates**: Domain event system automatically updates read models
-  - Event emitter system (`src/shared/events/event-emitter.ts`)
-  - Read model listeners (`src/shared/events/read-model-listeners.ts`)
-  - Automatic updates on test run create/update/delete
-  - Automatic updates on test run result create/update/delete
-  - Event listeners initialized on server startup
-  - See `docs/EVENT_DRIVEN_ARCHITECTURE.md` for detailed documentation
-- ✅ **Job API**: `/jobs/update-test-runs-view` - Manual trigger endpoint (for recovery/rebuild)
-- ❌ `bug_budget_view` - Denormalized bug budget view (can be added later if needed)
+**Missing Implementation:**
+- Models need to be added to Prisma schema (except settings)
+- API routes for configuration management
+- Real-time notification system
 
-### 10. CHANGE DATA CAPTURE (CDC) ✅
-**Models exist in Prisma:**
-- ✅ `change_log` - Database change tracking
-  - Enum: `ChangeType` (insert, update, delete)
-  - Fields: table_name, record_id, change_type, old_values, new_values, changed_at, changed_by, transaction_id, source
-  - Indexes: (table_name, record_id, changed_at), (changed_at), (change_type, changed_at), (transaction_id), (table_name, change_type, changed_at)
-  - Relation: `changer` (User) - on delete set null
+### 9. CQRS READ MODELS
+**Models NOT in Prisma schema:**
+- ❌ `test_runs_view` - Denormalized test runs view
+- ❌ `bug_budget_view` - Denormalized bug budget view
 
-**API Routes:**
-- ✅ `GET /api/v1/change-logs` - List change logs with filtering and pagination
-  - Query params: tableName, recordId, changeType, source, transactionId, startDate, endDate, page, limit
-- ✅ `GET /api/v1/change-logs/:id` - Get specific change log by ID
-- ✅ `GET /api/v1/change-logs/table/:tableName/record/:recordId` - Get change history for a specific record
-- ✅ `GET /api/v1/change-logs/statistics/summary` - Get change log statistics (total, by type, by table, recent 24h)
+**Missing Implementation:**
+- Models need to be added to Prisma schema
+- Event listeners to update read models
+- API routes using read models for fast queries
 
-**Utilities:**
-- ✅ `src/shared/utils/change-logger.ts` - Change logging utilities
-  - `logChange()` - Generic change logger
-  - `logInsert()` - Log insert operations
-  - `logUpdate()` - Log update operations
-  - `logDelete()` - Log delete operations
-  - `extractChangedFields()` - Helper to extract changed fields
-  - `sanitizeForChangeLog()` - Helper to sanitize sensitive fields
-
-**Integration:**
-- ✅ Change logging integrated into test-runs routes (create, update, delete)
-- ⚠️ Change logging can be added to other routes as needed
-- ⚠️ Automatic change logging via Prisma middleware (future enhancement)
+### 10. CHANGE DATA CAPTURE (CDC)
+**Models NOT in Prisma schema:**
+- ❌ `change_log` - Database change tracking
 
 **Missing Implementation:**
 - Model needs to be added to Prisma schema
@@ -229,47 +163,24 @@ This document tracks what has been implemented from the `schema.dbml` file versu
 - Saga pattern implementation
 - API routes for workflow management
 
-### 12. METADATA & EXTENSIBILITY ✅
-**Models exist in Prisma:**
-- ✅ `entity_metadata` - Generic metadata storage
-  - Fields: entity_type, entity_id, meta_key, meta_value
-  - Unique constraint: (entity_type, entity_id, meta_key)
-  - Indexes: (entity_type, entity_id), (meta_key, meta_value)
+### 12. METADATA & EXTENSIBILITY
+**Models NOT in Prisma schema:**
+- ❌ `entity_metadata` - Generic metadata storage
 
-**API Routes:**
-- ✅ `GET /api/v1/entity-metadata` - List metadata with filtering
-- ✅ `GET /api/v1/entity-metadata/:id` - Get specific metadata entry
-- ✅ `GET /api/v1/entity-metadata/entity/:entityType/:entityId` - Get all metadata for an entity
-- ✅ `POST /api/v1/entity-metadata` - Create/update metadata (upsert)
-- ✅ `PATCH /api/v1/entity-metadata/:id` - Update metadata value
-- ✅ `PUT /api/v1/entity-metadata/entity/:entityType/:entityId/bulk` - Bulk update metadata
-- ✅ `DELETE /api/v1/entity-metadata/:id` - Delete specific metadata entry
-- ✅ `DELETE /api/v1/entity-metadata/entity/:entityType/:entityId` - Delete all metadata for an entity
+**Missing Implementation:**
+- Model needs to be added to Prisma schema
+- API routes for metadata management
 
-**Features:**
-- Key-value storage for any entity type
-- Upsert operations (create or update)
-- Bulk operations for multiple metadata entries
-- Filtering by entity type, entity ID, meta key, meta value
-- Supports custom fields, tags, labels without schema changes
-
-### 13. CONTENT STORAGE & ARCHIVING ✅
-**Models exist in Prisma:**
+### 13. CONTENT STORAGE & ARCHIVING
+**Models NOT in Prisma schema:**
 - ✅ `content_storage` - Model exists in Prisma
-- ✅ `audit_logs_archive` - Archived audit logs (model exists)
-- ✅ `jira_table_history_archive` - Archived Jira history (model exists)
+- ❌ `audit_logs_archive` - Archived audit logs
+- ❌ `jira_table_history_archive` - Archived Jira history
 
-**API Routes:**
-- ✅ `GET /api/v1/archive/audit-logs` - List archived audit logs (read-only)
-- ✅ `GET /api/v1/archive/audit-logs/:id` - Get specific archived audit log
-- ✅ `GET /api/v1/archive/jira-history` - List archived Jira history (read-only)
-- ✅ `GET /api/v1/archive/jira-history/:id` - Get specific archived Jira history entry
-
-**Features:**
-- Read-only access to archived data
-- Filtering by model type, user, action, date range
-- Pagination support
-- ⚠️ Archive job scheduling - To be implemented separately (move old records to archive)
+**Missing Implementation:**
+- Archive models need to be added to Prisma schema
+- Archive job scheduling
+- Archive API routes (read-only)
 
 ### 14. DEPRECATED TABLES (Not Implemented - By Design)
 - ❌ `documents_manager` - Deprecated, should migrate to `documents`
@@ -283,12 +194,10 @@ This document tracks what has been implemented from the `schema.dbml` file versu
 
 ### Statistics
 - **Total Tables in Schema**: ~50+ tables
-- **Models in Prisma**: 62 models (added PRD Reviews, Audit Events, Decision Logs, Entity Metadata, Analytics & Reporting, Workflow Sagas, Bug Budget View)
-- **API Routes Implemented**: ~180+ endpoints (including bulk operations and enhanced features)
-- **Jobs Implemented**: Analytics population, Test runs view update
-- **Event System**: Domain events with automatic audit logging
-- **Missing Models**: 0 models - **ALL SCHEMA MODELS IMPLEMENTED!** 🎉
-- **Missing API Routes**: Integration/sync jobs only (external functionality)
+- **Models in Prisma**: 32 models (added DocumentTemplate, EditorImage)
+- **API Routes Implemented**: ~90+ endpoints
+- **Missing Models**: ~18 models
+- **Missing API Routes**: ~50+ endpoints estimated
 
 ### Priority Implementation Order
 
@@ -318,14 +227,9 @@ This document tracks what has been implemented from the `schema.dbml` file versu
    - Need to add models to Prisma first
    - Important for insights and reporting
 
-6. ✅ **System Configuration** (Settings, Menu Visibility, Notifications) - COMPLETED
-   - ✅ All models exist in Prisma schema
-   - ✅ Full CRUD API routes implemented
-   - ✅ Bulk operations for settings and menu visibilities
-   - ✅ Menu visibility tree/hierarchy endpoint
-   - ✅ Notification statistics endpoint
-   - ✅ Settings by category endpoint
-   - ⚠️ Real-time notification system - To be implemented separately (WebSocket/SSE)
+6. **System Configuration** (Settings, Menu Visibility, Notifications)
+   - Some models exist, need API routes
+   - Important for system customization
 
 #### 🟢 Low Priority (Advanced Features)
 7. **CQRS Read Models** (Performance optimization)
@@ -337,11 +241,11 @@ This document tracks what has been implemented from the `schema.dbml` file versu
 
 ## 🎯 Next Steps
 
-1. ✅ **Add Missing Models to Prisma Schema** - COMPLETED
-   - ✅ Bug tracking models
-   - ✅ Analytics models
-   - ✅ System configuration models
-   - ✅ Archive tables
+1. **Add Missing Models to Prisma Schema**
+   - Bug tracking models
+   - Analytics models
+   - System configuration models
+   - Archive tables
 
 2. ✅ **Implement Test Management APIs** - COMPLETED
    - ✅ Suites and Test Cases
@@ -358,10 +262,10 @@ This document tracks what has been implemented from the `schema.dbml` file versu
    - Implement CRUD APIs
    - Add Jira integration
 
-5. ✅ **Build Analytics Dashboard** - COMPLETED
-   - ✅ Add analytics models
-   - ✅ Implement summary table population jobs
-   - ✅ Create analytics API endpoints
+5. **Build Analytics Dashboard**
+   - Add analytics models
+   - Implement summary table population jobs
+   - Create analytics API endpoints
 
 ---
 

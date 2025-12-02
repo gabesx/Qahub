@@ -1100,7 +1100,15 @@ router.get('/me', authenticateToken, async (req, res) => {
       include: {
         tenantUsers: {
           include: {
-            tenant: true,
+            tenant: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                plan: true,
+                status: true,
+              },
+            },
           },
         },
       },

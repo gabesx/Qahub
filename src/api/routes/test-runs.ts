@@ -547,38 +547,6 @@ router.post('/projects/:projectId/test-runs', authenticateToken, async (req, res
 
     logger.info(`Test run created: ${testRun.title} in project ${projectId} by user ${userId}`);
 
-    // Log change for CDC
-    try {
-      const { logInsert, sanitizeForChangeLog } = await import('../../shared/utils/change-logger');
-      await logInsert('test_runs', testRun.id, sanitizeForChangeLog(testRun), {
-        userId,
-        source: 'api',
-      });
-    } catch (changeLogError) {
-      logger.warn('Failed to log change for test run creation:', changeLogError);
-    }
-
-    // Emit domain event for read model update
-    try {
-      const { domainEventEmitter, DomainEventType } = await import('../../shared/events/event-emitter');
-      domainEventEmitter.emitEvent({
-        type: DomainEventType.TEST_RUN_CREATED,
-        aggregateType: 'test_run',
-        aggregateId: testRun.id,
-        data: {
-          testRunId: testRun.id.toString(),
-          projectId: testRun.projectId.toString(),
-          testPlanId: testRun.testPlanId.toString(),
-        },
-        metadata: {
-          userId,
-          timestamp: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.warn('Failed to emit test run created event:', error);
-    }
-
     res.status(201).json({
       data: {
         testRun: {
@@ -753,44 +721,6 @@ router.patch('/projects/:projectId/test-runs/:testRunId', authenticateToken, asy
 
     logger.info(`Test run updated: ${testRun.title} by user ${userId}`);
 
-    // Log change for CDC
-    try {
-      const { logUpdate, sanitizeForChangeLog } = await import('../../shared/utils/change-logger');
-      await logUpdate(
-        'test_runs',
-        testRun.id,
-        sanitizeForChangeLog(existing),
-        sanitizeForChangeLog(testRun),
-        {
-          userId,
-          source: 'api',
-        }
-      );
-    } catch (changeLogError) {
-      logger.warn('Failed to log change for test run update:', changeLogError);
-    }
-
-    // Emit domain event for read model update
-    try {
-      const { domainEventEmitter, DomainEventType } = await import('../../shared/events/event-emitter');
-      domainEventEmitter.emitEvent({
-        type: DomainEventType.TEST_RUN_UPDATED,
-        aggregateType: 'test_run',
-        aggregateId: testRun.id,
-        data: {
-          testRunId: testRun.id.toString(),
-          projectId: testRun.projectId.toString(),
-          testPlanId: testRun.testPlanId.toString(),
-        },
-        metadata: {
-          userId,
-          timestamp: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.warn('Failed to emit test run updated event:', error);
-    }
-
     res.json({
       data: {
         testRun: {
@@ -888,37 +818,6 @@ router.delete('/projects/:projectId/test-runs/:testRunId', authenticateToken, as
     await prisma.testRun.delete({
       where: { id: testRunId },
     });
-
-    // Log change for CDC
-    try {
-      const { logDelete, sanitizeForChangeLog } = await import('../../shared/utils/change-logger');
-      await logDelete('test_runs', testRunId, sanitizeForChangeLog(testRun), {
-        userId,
-        source: 'api',
-      });
-    } catch (changeLogError) {
-      logger.warn('Failed to log change for test run deletion:', changeLogError);
-    }
-
-    // Emit domain event for read model update
-    try {
-      const { domainEventEmitter, DomainEventType } = await import('../../shared/events/event-emitter');
-      domainEventEmitter.emitEvent({
-        type: DomainEventType.TEST_RUN_DELETED,
-        aggregateType: 'test_run',
-        aggregateId: testRunId,
-        data: {
-          testRunId: testRunId.toString(),
-          projectId: projectId.toString(),
-        },
-        metadata: {
-          userId,
-          timestamp: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.warn('Failed to emit test run deleted event:', error);
-    }
 
     // Create audit log
     try {

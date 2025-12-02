@@ -492,27 +492,6 @@ router.post('/test-runs/:testRunId/results', authenticateToken, async (req, res)
 
     logger.info(`Test run result created: ${result.id} for test case ${data.testCaseId} in test run ${testRunId} by user ${userId}`);
 
-    // Emit domain event for read model update
-    try {
-      const { domainEventEmitter, DomainEventType } = await import('../../shared/events/event-emitter');
-      domainEventEmitter.emitEvent({
-        type: DomainEventType.TEST_RUN_RESULT_CREATED,
-        aggregateType: 'test_run_result',
-        aggregateId: result.id,
-        data: {
-          testRunResultId: result.id.toString(),
-          testRunId: testRunId.toString(),
-          testCaseId: data.testCaseId,
-        },
-        metadata: {
-          userId,
-          timestamp: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.warn('Failed to emit test run result created event:', error);
-    }
-
     res.status(201).json({
       data: {
         result: {
@@ -702,26 +681,6 @@ router.patch('/test-runs/:testRunId/results/:resultId', authenticateToken, async
     }
 
     logger.info(`Test run result updated: ${result.id} by user ${userId}`);
-
-    // Emit domain event for read model update
-    try {
-      const { domainEventEmitter, DomainEventType } = await import('../../shared/events/event-emitter');
-      domainEventEmitter.emitEvent({
-        type: DomainEventType.TEST_RUN_RESULT_UPDATED,
-        aggregateType: 'test_run_result',
-        aggregateId: result.id,
-        data: {
-          testRunResultId: result.id.toString(),
-          testRunId: testRunId.toString(),
-        },
-        metadata: {
-          userId,
-          timestamp: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.warn('Failed to emit test run result updated event:', error);
-    }
 
     res.json({
       data: {
