@@ -3,8 +3,139 @@ import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+// Define permissions for each role
+const ROLE_PERMISSIONS = {
+  admin: [
+    'projects.addEdit',
+    'projects.delete',
+    'repositories.addEdit',
+    'repositories.delete',
+    'testSuites.addEdit',
+    'testSuites.delete',
+    'testCases.addEdit',
+    'testCases.delete',
+    'testPlans.addEdit',
+    'testPlans.delete',
+    'testRuns.addEdit',
+    'testRuns.delete',
+    'documents.addEdit',
+    'documents.delete',
+    'userManagement.manage',
+    'systemSettings.access',
+    'systemSettings.manageMenu',
+  ],
+  manager: [
+    'projects.addEdit',
+    'projects.delete',
+    'repositories.addEdit',
+    'repositories.delete',
+    'testSuites.addEdit',
+    'testSuites.delete',
+    'testCases.addEdit',
+    'testCases.delete',
+    'testPlans.addEdit',
+    'testPlans.delete',
+    'testRuns.addEdit',
+    'testRuns.delete',
+    'documents.addEdit',
+    'documents.delete',
+    'systemSettings.access',
+    'systemSettings.manageMenu',
+  ],
+  tester: [
+    'projects.addEdit',
+    'repositories.addEdit',
+    'testSuites.addEdit',
+    'testSuites.delete',
+    'testCases.addEdit',
+    'testCases.delete',
+    'testPlans.addEdit',
+    'testPlans.delete',
+    'testRuns.addEdit',
+    'testRuns.delete',
+    'documents.addEdit',
+    'documents.delete',
+  ],
+  developer: [
+    'documents.addEdit',
+    'documents.delete',
+  ],
+  guest: [],
+};
+
 async function main() {
   console.log('🌱 Starting database seed...');
+
+  // Create roles and permissions
+  console.log('📋 Creating roles and permissions...');
+  const guardName = 'web'; // Default guard name
+  
+  const roles: Record<string, any> = {};
+  const permissions: Record<string, any> = {};
+
+  // Create all permissions first
+  const allPermissions = new Set<string>();
+  Object.values(ROLE_PERMISSIONS).forEach(perms => {
+    perms.forEach(perm => allPermissions.add(perm));
+  });
+
+  for (const permName of allPermissions) {
+    const permission = await prisma.permission.upsert({
+      where: {
+        name_guardName: {
+          name: permName,
+          guardName,
+        },
+      },
+      update: {},
+      create: {
+        name: permName,
+        guardName,
+      },
+    });
+    permissions[permName] = permission;
+    console.log(`  ✅ Permission: ${permName}`);
+  }
+
+  // Create roles and assign permissions
+  for (const [roleName, rolePerms] of Object.entries(ROLE_PERMISSIONS)) {
+    const role = await prisma.role.upsert({
+      where: {
+        name_guardName: {
+          name: roleName,
+          guardName,
+        },
+      },
+      update: {},
+      create: {
+        name: roleName,
+        guardName,
+      },
+    });
+    roles[roleName] = role;
+    console.log(`  ✅ Role: ${roleName}`);
+
+    // Assign permissions to role
+    for (const permName of rolePerms) {
+      const permission = permissions[permName];
+      if (permission) {
+        await prisma.rolePermission.upsert({
+          where: {
+            permissionId_roleId: {
+              permissionId: permission.id,
+              roleId: role.id,
+            },
+          },
+          update: {},
+          create: {
+            permissionId: permission.id,
+            roleId: role.id,
+          },
+        });
+      }
+    }
+    console.log(`    ✅ Assigned ${rolePerms.length} permissions to ${roleName}`);
+  }
 
   // Create default tenant
   const tenant = await prisma.tenant.upsert({
@@ -57,6 +188,24 @@ async function main() {
   });
 
   console.log('✅ Created/Updated admin user:', admin.email);
+
+  // Assign admin role to admin user via RBAC
+  if (roles.admin) {
+    await prisma.userRole.upsert({
+      where: {
+        userId_roleId: {
+          userId: admin.id,
+          roleId: roles.admin.id,
+        },
+      },
+      update: {},
+      create: {
+        userId: admin.id,
+        roleId: roles.admin.id,
+      },
+    });
+    console.log('✅ Assigned admin role to admin user via RBAC');
+  }
 
   // Link admin to tenant
   await prisma.tenantUser.upsert({

@@ -76,6 +76,10 @@ export default function ProfilePage() {
   })
   const [activities, setActivities] = useState<Activity[]>([])
   const [isLoadingActivities, setIsLoadingActivities] = useState(false)
+  const [activitiesPage, setActivitiesPage] = useState(1)
+  const [activitiesLimit, setActivitiesLimit] = useState(10)
+  const [activitiesTotal, setActivitiesTotal] = useState(0)
+  const [activitiesTotalPages, setActivitiesTotalPages] = useState(0)
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
   const [isRemovingAvatar, setIsRemovingAvatar] = useState(false)
 
@@ -109,7 +113,7 @@ export default function ProfilePage() {
       return
     }
     fetchUser()
-    fetchActivities()
+    fetchActivities(1, 10) // Initial load: page 1, limit 10
   }, [])
 
   const fetchUser = async () => {
@@ -168,12 +172,25 @@ export default function ProfilePage() {
     }
   };
 
-  const fetchActivities = async () => {
+  const fetchActivities = async (page?: number, limit?: number) => {
+    const pageNum = page ?? activitiesPage
+    const limitNum = limit ?? activitiesLimit
     setIsLoadingActivities(true)
     try {
-      const response = await api.get('/users/me/activities')
-      if (response.data?.data?.activities) {
-        setActivities(response.data.data.activities)
+      const response = await api.get('/users/me/activities', {
+        params: {
+          page: pageNum,
+          limit: limitNum,
+        },
+      })
+      if (response.data?.data) {
+        setActivities(response.data.data.activities || [])
+        if (response.data.data.pagination) {
+          setActivitiesTotal(response.data.data.pagination.total)
+          setActivitiesTotalPages(response.data.data.pagination.totalPages)
+          setActivitiesPage(pageNum)
+          setActivitiesLimit(limitNum)
+        }
       }
     } catch (err: any) {
       console.error('Error fetching activities:', err)
@@ -181,6 +198,19 @@ export default function ProfilePage() {
     } finally {
       setIsLoadingActivities(false)
     }
+  }
+
+  // Handle page size change
+  const handlePageSizeChange = (newLimit: number) => {
+    setActivitiesLimit(newLimit)
+    setActivitiesPage(1) // Reset to first page when changing page size
+    fetchActivities(1, newLimit)
+  }
+
+  // Handle page change
+  const handlePageChange = (newPage: number) => {
+    setActivitiesPage(newPage)
+    fetchActivities(newPage, activitiesLimit)
   }
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -205,7 +235,7 @@ export default function ProfilePage() {
         setUser(response.data.data.user)
         setSuccess('Profile picture uploaded successfully')
         setTimeout(() => setSuccess(null), 3000)
-        fetchActivities() // Refresh activities
+        fetchActivities(activitiesPage, activitiesLimit) // Refresh activities with current pagination
       }
     } catch (err: any) {
       setError(err.response?.data?.error?.message || 'Failed to upload profile picture')
@@ -231,7 +261,7 @@ export default function ProfilePage() {
         setUser(response.data.data.user)
         setSuccess('Profile picture removed successfully')
         setTimeout(() => setSuccess(null), 3000)
-        fetchActivities() // Refresh activities
+        fetchActivities(activitiesPage, activitiesLimit) // Refresh activities with current pagination
       }
     } catch (err: any) {
       setError(err.response?.data?.error?.message || 'Failed to remove profile picture')
@@ -256,7 +286,7 @@ export default function ProfilePage() {
         setUser(response.data.data.user)
         setSuccess('Profile updated successfully')
         setTimeout(() => setSuccess(null), 3000)
-        fetchActivities() // Refresh activities
+        fetchActivities(activitiesPage, activitiesLimit) // Refresh activities with current pagination
       }
     } catch (err: any) {
       setError(err.response?.data?.error?.message || 'Failed to update profile')
@@ -282,7 +312,7 @@ export default function ProfilePage() {
       setTimeout(() => setSuccess(null), 5000)
       
       // Refresh activities to show the password change event
-      fetchActivities()
+      fetchActivities(activitiesPage, activitiesLimit)
     } catch (err: any) {
       // Check if it's a 401 error (unauthorized) - this shouldn't happen but handle it
       if (err.response?.status === 401) {
@@ -628,16 +658,24 @@ export default function ProfilePage() {
               </svg>
               <h3 className="text-lg font-semibold text-gray-800">Recent Activities</h3>
             </div>
-            <div className="flex items-center space-x-2">
-              <select className="text-sm border border-gray-300 rounded-lg px-3 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500">
-                <option>All Activities</option>
-                <option>Profile Updates</option>
-                <option>Avatar Changes</option>
-              </select>
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
+                <label className="text-sm text-gray-600">Show:</label>
+                <select
+                  value={activitiesLimit}
+                  onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                  disabled={isLoadingActivities}
+                  className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+                >
+                  <option value={10}>10</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
               <button
-                onClick={fetchActivities}
+                onClick={() => fetchActivities(activitiesPage, activitiesLimit)}
                 disabled={isLoadingActivities}
-                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Refresh"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -657,51 +695,108 @@ export default function ProfilePage() {
               <p className="text-gray-500">No activities yet</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {activities.map((activity, index) => (
-                <div key={activity.id} className="flex items-start space-x-4 relative">
-                  {/* Timeline line */}
-                  {index < activities.length - 1 && (
-                    <div className="absolute left-5 top-12 w-0.5 h-full bg-gray-200"></div>
-                  )}
-                  
-                  {/* Icon */}
-                  <div className="relative z-10 flex-shrink-0">
-                    {activity.icon === 'user-gear' ? (
-                      <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                      </div>
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
-                        <div className="w-3 h-3 rounded-full bg-gray-400"></div>
-                      </div>
+            <>
+              <div className="space-y-4">
+                {activities.map((activity, index) => (
+                  <div key={activity.id} className="flex items-start space-x-4 relative">
+                    {/* Timeline line */}
+                    {index < activities.length - 1 && (
+                      <div className="absolute left-5 top-12 w-0.5 h-full bg-gray-200"></div>
                     )}
-                  </div>
+                    
+                    {/* Icon */}
+                    <div className="relative z-10 flex-shrink-0">
+                      {activity.icon === 'user-gear' ? (
+                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+                          <div className="w-3 h-3 rounded-full bg-gray-400"></div>
+                        </div>
+                      )}
+                    </div>
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">{activity.title}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Action: <span className="text-blue-600">{activity.action}</span> • Feature: <span className="text-blue-600">{activity.feature}</span>
-                        </p>
-                        {activity.modelId && (
-                          <p className="text-xs text-gray-400 mt-1">ID: {activity.modelId}</p>
-                        )}
-                      </div>
-                      <div className="ml-4 flex-shrink-0">
-                        <p className="text-xs text-gray-500 whitespace-nowrap">
-                          {formatRelativeTime(activity.createdAt)}
-                        </p>
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">{activity.title}</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Action: <span className="text-blue-600">{activity.action}</span> • Feature: <span className="text-blue-600">{activity.feature}</span>
+                          </p>
+                          {activity.modelId && (
+                            <p className="text-xs text-gray-400 mt-1">ID: {activity.modelId}</p>
+                          )}
+                        </div>
+                        <div className="ml-4 flex-shrink-0">
+                          <p className="text-xs text-gray-500 whitespace-nowrap">
+                            {formatRelativeTime(activity.createdAt)}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
+                ))}
+              </div>
+
+              {/* Pagination */}
+              {activitiesTotalPages > 1 && (
+                <div className="mt-6 flex items-center justify-between border-t border-gray-200 pt-4">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm text-gray-600">
+                      Showing {((activitiesPage - 1) * activitiesLimit) + 1} to {Math.min(activitiesPage * activitiesLimit, activitiesTotal)} of {activitiesTotal} activities
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handlePageChange(activitiesPage - 1)}
+                      disabled={activitiesPage === 1 || isLoadingActivities}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    <div className="flex items-center space-x-1">
+                      {Array.from({ length: Math.min(activitiesTotalPages, 7) }, (_, i) => {
+                        let pageNum: number
+                        if (activitiesTotalPages <= 7) {
+                          pageNum = i + 1
+                        } else if (activitiesPage <= 4) {
+                          pageNum = i + 1
+                        } else if (activitiesPage >= activitiesTotalPages - 3) {
+                          pageNum = activitiesTotalPages - 6 + i
+                        } else {
+                          pageNum = activitiesPage - 3 + i
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => handlePageChange(pageNum)}
+                            disabled={isLoadingActivities}
+                            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                              activitiesPage === pageNum
+                                ? 'bg-primary-600 text-white'
+                                : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                            {pageNum}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <button
+                      onClick={() => handlePageChange(activitiesPage + 1)}
+                      disabled={activitiesPage === activitiesTotalPages || isLoadingActivities}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
       </main>

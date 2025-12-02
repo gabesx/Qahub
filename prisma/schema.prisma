@@ -104,16 +104,39 @@ model User {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamp
 
-  tenantUsers          TenantUser[]
-  passwordResets       PasswordReset[]
-  personalAccessTokens PersonalAccessToken[]
-  passwordHistory      PasswordHistory[]
-  userRoles            UserRole[]
-  userPermissions      UserPermission[]
-  createdProjects      Project[]             @relation("ProjectCreator")
-  updatedProjects      Project[]             @relation("ProjectUpdater")
-  auditLogs            AuditLog[]
-  sentInvitations      UserInvitation[]       @relation("UserInvitations")
+  tenantUsers             TenantUser[]
+  passwordResets          PasswordReset[]
+  personalAccessTokens    PersonalAccessToken[]
+  passwordHistory         PasswordHistory[]
+  userRoles               UserRole[]
+  userPermissions         UserPermission[]
+  createdProjects         Project[]             @relation("ProjectCreator")
+  updatedProjects         Project[]             @relation("ProjectUpdater")
+  auditLogs               AuditLog[]
+  changeLogs              ChangeLog[]           @relation("ChangeLogChanger")
+  sentInvitations         UserInvitation[]      @relation("UserInvitations")
+  documentTemplates       DocumentTemplate[]    @relation("DocumentTemplateCreator")
+  editorImages            EditorImage[]         @relation("EditorImageUploader")
+  menuVisibilitiesCreated MenuVisibility[]      @relation("MenuVisibilityCreator")
+  menuVisibilitiesUpdated MenuVisibility[]      @relation("MenuVisibilityUpdater")
+  bugBudgetsAssigned      BugBudget[]           @relation("BugBudgetAssignee")
+  bugBudgetsReported      BugBudget[]           @relation("BugBudgetReporter")
+  bugBudgetsCreated       BugBudget[]           @relation("BugBudgetCreator")
+  jiraFieldsCreated       JiraField[]           @relation("JiraFieldCreator")
+  jiraFieldsUpdated       JiraField[]           @relation("JiraFieldUpdater")
+  decisionLogsOwned       DecisionLog[]         @relation("DecisionLogOwner")
+  decisionLogsCreated     DecisionLog[]         @relation("DecisionLogCreator")
+  decisionLogsUpdated     DecisionLog[]         @relation("DecisionLogUpdater")
+  prdReviewsReviewed      PrdReview[]           @relation("PrdReviewReviewer")
+  prdReviewsCreated       PrdReview[]           @relation("PrdReviewCreator")
+  prdReviewsUpdated       PrdReview[]           @relation("PrdReviewUpdater")
+  auditEvents             AuditEvent[]
+  allureReportsCreated    AllureReport[]        @relation("AllureReportCreator")
+  allureReportsUpdated    AllureReport[]        @relation("AllureReportUpdater")
+  gitlabMrAuthors         GitlabMrLeadTime[]    @relation("GitlabMrAuthor")
+  gitlabMrContributors    GitlabMrContributor[] @relation("GitlabMrContributor")
+  monthlyContributions    MonthlyContribution[] @relation("MonthlyContributionUser")
+  workflowSagasStarted    WorkflowSaga[]        @relation("WorkflowSagaStarter")
 
   @@index([email])
   @@index([googleId])
@@ -121,13 +144,13 @@ model User {
 }
 
 model PasswordReset {
-  id         BigInt    @id @default(autoincrement()) @db.BigInt
-  email      String    @db.VarChar(255)
-  userId     BigInt?   @map("user_id") @db.BigInt
-  token      String    @unique @db.VarChar(255)
-  usedAt     DateTime? @map("used_at") @db.Timestamp
-  expiresAt  DateTime? @map("expires_at") @db.Timestamp
-  createdAt  DateTime? @map("created_at") @db.Timestamp
+  id        BigInt    @id @default(autoincrement()) @db.BigInt
+  email     String    @db.VarChar(255)
+  userId    BigInt?   @map("user_id") @db.BigInt
+  token     String    @unique @db.VarChar(255)
+  usedAt    DateTime? @map("used_at") @db.Timestamp
+  expiresAt DateTime? @map("expires_at") @db.Timestamp
+  createdAt DateTime? @map("created_at") @db.Timestamp
 
   user            User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
   passwordHistory PasswordHistory[]
@@ -168,14 +191,14 @@ model PersonalAccessToken {
 }
 
 model PasswordHistory {
-  id              BigInt        @id @default(autoincrement()) @db.BigInt
-  userId          BigInt        @map("user_id") @db.BigInt
-  passwordHash    String        @map("password_hash") @db.VarChar(255)
-  passwordResetId BigInt?       @map("password_reset_id") @db.BigInt
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamp
+  id              BigInt   @id @default(autoincrement()) @db.BigInt
+  userId          BigInt   @map("user_id") @db.BigInt
+  passwordHash    String   @map("password_hash") @db.VarChar(255)
+  passwordResetId BigInt?  @map("password_reset_id") @db.BigInt
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamp
 
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  passwordReset   PasswordReset? @relation(fields: [passwordResetId], references: [id], onDelete: SetNull)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passwordReset PasswordReset? @relation(fields: [passwordResetId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([passwordResetId])
@@ -194,8 +217,8 @@ model UserInvitation {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamp
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamp
 
-  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  inviter  User    @relation("UserInvitations", fields: [invitedBy], references: [id], onDelete: Cascade)
+  tenant  Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inviter User    @relation("UserInvitations", fields: [invitedBy], references: [id], onDelete: Cascade)
 
   @@index([email])
   @@index([token])
@@ -294,13 +317,22 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
 
-  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  creator      User?        @relation("ProjectCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  updater      User?        @relation("ProjectUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
-  repositories Repository[]
-  testPlans    TestPlan[]
-  testRuns     TestRun[]
-  documents    Document[]
+  tenant                 Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator                User?                  @relation("ProjectCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater                User?                  @relation("ProjectUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+  repositories           Repository[]
+  testPlans              TestPlan[]
+  testExecutionSummaries TestExecutionSummary[]
+  bugAnalyticsDaily      BugAnalyticsDaily[]
+  testCaseAnalytics      TestCaseAnalytics[]
+  testRuns               TestRun[]
+  documents              Document[]
+  bugBudgets             BugBudget[]
+  prdReviews             PrdReview[]
+  gitlabMrLeadTimes      GitlabMrLeadTime[]
+  gitlabMrContributors   GitlabMrContributor[]
+  jiraLeadTimes          JiraLeadTime[]
+  monthlyContributions   MonthlyContribution[]
 
   @@index([tenantId, id])
   @@index([tenantId, createdAt])
@@ -322,11 +354,12 @@ model Repository {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  suites    Suite[]
-  testPlans TestPlan[]
-  testRuns  TestRun[]
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project           Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  suites            Suite[]
+  testPlans         TestPlan[]
+  testRuns          TestRun[]
+  testCaseAnalytics TestCaseAnalytics[]
 
   @@index([tenantId, id])
   @@index([tenantId, projectId])
@@ -575,8 +608,9 @@ model TestRunResult {
   retryCount         Int                  @default(0) @map("retry_count") @db.Integer
   createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamp
 
-  testRun  TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
-  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  testRun   TestRun    @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  testCase  TestCase   @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  bugBudget BugBudget? @relation(fields: [bugBudgetId], references: [id], onDelete: SetNull)
 
   @@unique([testRunId, testCaseId])
   @@index([testRunId, status])
@@ -759,22 +793,444 @@ model ContentStorage {
   @@map("content_storage")
 }
 
+model DocumentTemplate {
+  id        BigInt   @id @default(autoincrement()) @db.BigInt
+  name      String   @db.VarChar(255)
+  type      String   @db.VarChar(100)
+  content   String   @db.Text
+  variables Json?    @map("variables")
+  isActive  Boolean  @default(true) @map("is_active") @db.Boolean
+  createdBy BigInt?  @map("created_by") @db.BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  creator User? @relation("DocumentTemplateCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([type, isActive])
+  @@index([createdBy])
+  @@index([name])
+  @@map("document_templates")
+}
+
+model EditorImage {
+  id           BigInt   @id @default(autoincrement()) @db.BigInt
+  filename     String   @db.VarChar(255)
+  originalName String   @map("original_name") @db.VarChar(255)
+  path         String   @db.VarChar(500)
+  mimeType     String   @map("mime_type") @db.VarChar(100)
+  size         Int      @db.Integer
+  uploadedBy   BigInt?  @map("uploaded_by") @db.BigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  uploader User? @relation("EditorImageUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+
+  @@index([uploadedBy, createdAt])
+  @@index([mimeType])
+  @@index([filename])
+  @@map("editor_images")
+}
+
+// ========================================
+// ANALYTICS SUMMARY TABLES
+// ========================================
+
+model TestExecutionSummary {
+  id               BigInt   @id @default(autoincrement()) @db.BigInt
+  projectId        BigInt   @map("project_id") @db.BigInt
+  date             DateTime @db.Date
+  totalRuns        Int      @default(0) @map("total_runs") @db.Integer
+  passedRuns       Int      @default(0) @map("passed_runs") @db.Integer
+  failedRuns       Int      @default(0) @map("failed_runs") @db.Integer
+  skippedRuns      Int      @default(0) @map("skipped_runs") @db.Integer
+  blockedRuns      Int      @default(0) @map("blocked_runs") @db.Integer
+  automatedCount   Int      @default(0) @map("automated_count") @db.Integer
+  manualCount      Int      @default(0) @map("manual_count") @db.Integer
+  avgExecutionTime Decimal? @map("avg_execution_time") @db.Decimal(10, 2)
+  totalTestCases   Int      @default(0) @map("total_test_cases") @db.Integer
+  lastUpdatedAt    DateTime @map("last_updated_at") @db.Timestamp
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, date])
+  @@index([date])
+  @@index([projectId, date, lastUpdatedAt])
+  @@map("test_execution_summary")
+}
+
+model BugAnalyticsDaily {
+  id                 BigInt   @id @default(autoincrement()) @db.BigInt
+  project            String   @db.VarChar(255)
+  projectId          BigInt?  @map("project_id") @db.BigInt
+  date               DateTime @db.Date
+  bugsCreated        Int      @default(0) @map("bugs_created") @db.Integer
+  bugsResolved       Int      @default(0) @map("bugs_resolved") @db.Integer
+  bugsClosed         Int      @default(0) @map("bugs_closed") @db.Integer
+  bugsReopened       Int      @default(0) @map("bugs_reopened") @db.Integer
+  avgResolutionHours Decimal? @map("avg_resolution_hours") @db.Decimal(10, 2)
+  openBugs           Int      @default(0) @map("open_bugs") @db.Integer
+  criticalBugs       Int      @default(0) @map("critical_bugs") @db.Integer
+  highPriorityBugs   Int      @default(0) @map("high_priority_bugs") @db.Integer
+  mediumPriorityBugs Int      @default(0) @map("medium_priority_bugs") @db.Integer
+  lowPriorityBugs    Int      @default(0) @map("low_priority_bugs") @db.Integer
+  lastUpdatedAt      DateTime @map("last_updated_at") @db.Timestamp
+
+  projectRef Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([project, date])
+  @@unique([projectId, date])
+  @@index([date])
+  @@index([project, date, lastUpdatedAt])
+  @@index([projectId, date, lastUpdatedAt])
+  @@map("bug_analytics_daily")
+}
+
+model TestCaseAnalytics {
+  id                  BigInt   @id @default(autoincrement()) @db.BigInt
+  projectId           BigInt   @map("project_id") @db.BigInt
+  repositoryId        BigInt   @map("repository_id") @db.BigInt
+  date                DateTime @db.Date
+  totalCases          Int      @default(0) @map("total_cases") @db.Integer
+  automatedCases      Int      @default(0) @map("automated_cases") @db.Integer
+  manualCases         Int      @default(0) @map("manual_cases") @db.Integer
+  highPriorityCases   Int      @default(0) @map("high_priority_cases") @db.Integer
+  mediumPriorityCases Int      @default(0) @map("medium_priority_cases") @db.Integer
+  lowPriorityCases    Int      @default(0) @map("low_priority_cases") @db.Integer
+  regressionCases     Int      @default(0) @map("regression_cases") @db.Integer
+  lastUpdatedAt       DateTime @map("last_updated_at") @db.Timestamp
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, repositoryId, date])
+  @@index([date])
+  @@index([projectId, date])
+  @@map("test_case_analytics")
+}
+
+// ========================================
+// SYSTEM CONFIGURATION
+// ========================================
+
+model MenuVisibility {
+  id        BigInt   @id @default(autoincrement()) @db.BigInt
+  menuKey   String   @unique @map("menu_key") @db.VarChar(255)
+  menuName  String   @map("menu_name") @db.VarChar(255)
+  isVisible Boolean  @default(true) @map("is_visible") @db.Boolean
+  parentKey String?  @map("parent_key") @db.VarChar(255)
+  sortOrder Int?     @map("sort_order") @db.Integer
+  metadata  Json?    @map("metadata")
+  createdBy BigInt?  @map("created_by") @db.BigInt
+  updatedBy BigInt?  @map("updated_by") @db.BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  creator User? @relation("MenuVisibilityCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater User? @relation("MenuVisibilityUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([parentKey, sortOrder])
+  @@index([isVisible])
+  @@map("menu_visibilities")
+}
+
+model Notification {
+  id             String    @id @default(uuid()) @db.Uuid
+  type           String    @db.VarChar(255)
+  notifiableType String    @map("notifiable_type") @db.VarChar(255)
+  notifiableId   BigInt    @map("notifiable_id") @db.BigInt
+  data           String    @db.Text
+  readAt         DateTime? @map("read_at") @db.Timestamp
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  @@index([notifiableType, notifiableId, readAt, createdAt])
+  @@index([notifiableType, notifiableId, type])
+  @@map("notifications")
+}
+
+// ========================================
+// CQRS READ MODELS
+// ========================================
+
+model TestRunsView {
+  id                BigInt    @id @db.BigInt
+  testPlanId        BigInt    @map("test_plan_id") @db.BigInt
+  testPlanTitle     String    @map("test_plan_title") @db.VarChar(255)
+  projectId         BigInt    @map("project_id") @db.BigInt
+  projectTitle      String    @map("project_title") @db.VarChar(255)
+  repositoryId      BigInt    @map("repository_id") @db.BigInt
+  repositoryTitle   String    @map("repository_title") @db.VarChar(255)
+  title             String    @db.VarChar(255)
+  totalCases        Int       @default(0) @map("total_cases") @db.Integer
+  passedCases       Int       @default(0) @map("passed_cases") @db.Integer
+  failedCases       Int       @default(0) @map("failed_cases") @db.Integer
+  skippedCases      Int       @default(0) @map("skipped_cases") @db.Integer
+  blockedCases      Int       @default(0) @map("blocked_cases") @db.Integer
+  executionDate     DateTime? @map("execution_date") @db.Date
+  executionDuration Int?      @map("execution_duration") @db.Integer
+  createdById       BigInt?   @map("created_by_id") @db.BigInt
+  createdByName     String?   @map("created_by_name") @db.VarChar(255)
+  lastUpdatedAt     DateTime  @map("last_updated_at") @db.Timestamp
+
+  @@index([projectId, executionDate])
+  @@index([testPlanId, executionDate])
+  @@index([repositoryId, executionDate])
+  @@index([executionDate])
+  @@index([createdById])
+  @@map("test_runs_view")
+}
+
+// ========================================
+// BUG TRACKING & ISSUE MANAGEMENT
+// ========================================
+
+model BugBudget {
+  id             BigInt    @id @default(autoincrement()) @db.BigInt
+  jiraKey        String    @unique @map("jira_key") @db.VarChar(255)
+  project        String    @db.VarChar(255)
+  projectId      BigInt?   @map("project_id") @db.BigInt
+  summary        String    @db.Text
+  status         String?   @db.VarChar(255)
+  issueType      String?   @map("issue_type") @db.VarChar(255)
+  finalIssueType String?   @map("final_issue_type") @db.VarChar(255)
+  priority       String?   @db.VarChar(255)
+  severityIssue  String?   @map("severity_issue") @db.VarChar(255)
+  sprint         String?   @db.VarChar(255)
+  statusCategory String?   @map("status_category") @db.VarChar(255)
+  assigneeFinal  String?   @map("assignee_final") @db.VarChar(255)
+  assigneeId     BigInt?   @map("assignee_id") @db.BigInt
+  reporter       String?   @db.VarChar(255)
+  reporterId     BigInt?   @map("reporter_id") @db.BigInt
+  creator        String?   @db.VarChar(255)
+  creatorId      BigInt?   @map("creator_id") @db.BigInt
+  labels         String?   @db.Text
+  isOpen         Boolean   @default(true) @map("is_open") @db.Boolean
+  createdDate    DateTime? @map("created_date") @db.Timestamp
+  updatedDate    DateTime? @map("updated_date") @db.Timestamp
+  resolvedDate   DateTime? @map("resolved_date") @db.Timestamp
+  dueDate        DateTime? @map("due_date") @db.Timestamp
+  lastSyncedAt   DateTime? @map("last_synced_at") @db.Timestamp
+  description    String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  projectRef     Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assigneeUser   User?              @relation("BugBudgetAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reporterUser   User?              @relation("BugBudgetReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  creatorUser    User?              @relation("BugBudgetCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  metadata       BugBudgetMetadata?
+  testRunResults TestRunResult[]
+  jiraLeadTimes  JiraLeadTime[]
+
+  @@index([project, status, isOpen])
+  @@index([projectId, status, isOpen])
+  @@index([assigneeFinal, status])
+  @@index([assigneeId, status])
+  @@index([sprint, statusCategory])
+  @@index([createdDate, resolvedDate])
+  @@index([jiraKey, lastSyncedAt])
+  @@index([projectId])
+  @@map("bug_budget")
+}
+
+model BugBudgetMetadata {
+  bugBudgetId          BigInt   @id @map("bug_budget_id") @db.BigInt
+  epicHierarchy        Json?    @map("epic_hierarchy")
+  assigneeDetails      Json?    @map("assignee_details")
+  dateFields           Json?    @map("date_fields")
+  analysisFields       Json?    @map("analysis_fields")
+  classificationFields Json?    @map("classification_fields")
+  reportFields         Json?    @map("report_fields")
+  storyPointsData      Json?    @map("story_points_data")
+  versionFields        Json?    @map("version_fields")
+  rawJiraData          Json?    @map("raw_jira_data")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  bugBudget BugBudget @relation(fields: [bugBudgetId], references: [id], onDelete: Cascade)
+
+  @@map("bug_budget_metadata")
+}
+
+model JiraTableHistory {
+  id                         BigInt    @id @default(autoincrement()) @db.BigInt
+  project                    String?   @db.VarChar(255)
+  issuetype                  String?   @db.VarChar(255)
+  issuekey                   String    @unique @db.VarChar(255)
+  summary                    String?   @db.Text
+  description                String?   @db.Text
+  acceptanceCriteria         String?   @map("acceptance_criteria") @db.Text
+  implementationDetail       String?   @map("implementation_detail") @db.Text
+  components                 Json?     @map("components")
+  epicLink                   String?   @map("epic_link") @db.VarChar(255)
+  epicName                   String?   @map("epic_name") @db.VarChar(255)
+  epicStatus                 String?   @map("epic_status") @db.VarChar(255)
+  fixVersions                Json?     @map("fix_versions")
+  priority                   String?   @db.VarChar(255)
+  severityIssue              String?   @map("severity_issue") @db.VarChar(255)
+  comment                    Json?     @map("comment")
+  subtasks                   Json?     @map("subtasks")
+  parent                     String?   @db.VarChar(255)
+  parentLink                 String?   @map("parent_link") @db.VarChar(255)
+  labels                     Json?     @map("labels")
+  linkedIssues               Json?     @map("linked_issues")
+  linkedItems                Json?     @map("linked_items")
+  linkedTestDocument         String?   @map("linked_test_document") @db.VarChar(255)
+  testRunLink                String?   @map("test_run_link") @db.VarChar(255)
+  userJourney                String?   @map("user_journey") @db.VarChar(255)
+  serviceFeature             String?   @map("service_feature") @db.VarChar(255)
+  created                    DateTime? @map("created") @db.Timestamp
+  beginDate                  DateTime? @map("begin_date") @db.Timestamp
+  startDate                  DateTime? @map("start_date") @db.Date
+  actualStart                DateTime? @map("actual_start") @db.Timestamp
+  dueDate                    DateTime? @map("due_date") @db.Date
+  endDate                    DateTime? @map("end_date") @db.Timestamp
+  actualEnd                  DateTime? @map("actual_end") @db.Timestamp
+  sprint                     String?   @db.VarChar(255)
+  sprintId                   BigInt?   @map("sprint_id") @db.BigInt
+  sprintState                String?   @map("sprint_state") @db.VarChar(255)
+  sprintCompleteDate         DateTime? @map("sprint_complete_date") @db.Timestamp
+  sprintStartDate            DateTime? @map("sprint_start_date") @db.Timestamp
+  sprintEndDate              DateTime? @map("sprint_end_date") @db.Timestamp
+  sprintGoalId               BigInt?   @map("sprint_goal_id") @db.BigInt
+  status                     String?   @db.VarChar(255)
+  statusCategory             String?   @map("status_category") @db.VarChar(255)
+  statusCategoryChanged      DateTime? @map("status_category_changed") @db.Timestamp
+  owner                      String?   @db.VarChar(255)
+  approvers                  Json?     @map("approvers")
+  assignee                   String?   @db.VarChar(255)
+  engineerAssignee           Json?     @map("engineer_assignee")
+  collaborators              Json?     @map("collaborators")
+  testerAssignee             String?   @map("tester_assignee") @db.VarChar(255)
+  reporter                   String?   @db.VarChar(255)
+  storyPoints                Decimal?  @map("story_points") @db.Decimal(10, 2)
+  storyPointEstimate         Decimal?  @map("story_point_estimate") @db.Decimal(10, 2)
+  reTestPoint                Decimal?  @map("re_test_point") @db.Decimal(10, 2)
+  logWork                    Json?     @map("log_work")
+  originalEstimate           Int?      @map("original_estimate") @db.Integer
+  timeSpent                  Int?      @map("time_spent") @db.Integer
+  timeTracking               Json?     @map("time_tracking")
+  timeToFirstResponse        String?   @map("time_to_first_response") @db.VarChar(255)
+  timeToResolution           String?   @map("time_to_resolution") @db.VarChar(255)
+  timeToCloseAfterResolution String?   @map("time_to_close_after_resolution") @db.VarChar(255)
+  tisAlBoard                 String?   @map("tis_al_board") @db.VarChar(255)
+  chartDateOfFirstResponse   DateTime? @map("chart_date_of_first_response") @db.Timestamp
+  chartTimeInStatus          Json?     @map("chart_time_in_status")
+  updated                    DateTime? @map("updated") @db.Timestamp
+  resolution                 String?   @db.VarChar(255)
+  resolved                   DateTime? @map("resolved") @db.Timestamp
+  rawJiraData                Json?     @map("raw_jira_data")
+  syncedAt                   DateTime? @map("synced_at") @db.Timestamp
+  syncSource                 String?   @map("sync_source") @db.VarChar(255)
+  jqlQueryUsed               String?   @map("jql_query_used") @db.Text
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  @@index([project])
+  @@index([issuetype])
+  @@index([issuekey])
+  @@index([epicLink])
+  @@index([priority])
+  @@index([created])
+  @@index([updated])
+  @@index([status])
+  @@index([assignee])
+  @@index([reporter])
+  @@index([sprint])
+  @@index([sprintId])
+  @@index([syncedAt])
+  @@index([project, issuetype])
+  @@index([status, created])
+  @@index([assignee, status])
+  @@index([created, resolved])
+  @@index([sprintState, sprintCompleteDate])
+  @@index([sprintCompleteDate])
+  @@map("jira_table_history")
+}
+
+model JiraField {
+  id          BigInt    @id @default(autoincrement()) @db.BigInt
+  fieldType   String    @map("field_type") @db.VarChar(255)
+  fieldId     String    @unique @map("field_id") @db.VarChar(255)
+  description String?   @db.Text
+  isCustom    Boolean   @default(false) @map("is_custom") @db.Boolean
+  isActive    Boolean   @default(true) @map("is_active") @db.Boolean
+  sortOrder   Int       @default(0) @map("sort_order") @db.Integer
+  createdBy   BigInt?   @map("created_by") @db.BigInt
+  updatedBy   BigInt?   @map("updated_by") @db.BigInt
+  createdAt   DateTime? @map("created_at") @db.Timestamp
+  updatedAt   DateTime? @updatedAt @map("updated_at") @db.Timestamp
+
+  creator User? @relation("JiraFieldCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater User? @relation("JiraFieldUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([fieldId])
+  @@index([isCustom])
+  @@index([isActive])
+  @@index([fieldType, isActive])
+  @@index([createdBy])
+  @@map("jira_fields")
+}
+
+// ========================================
+// ARCHIVE TABLES
+// ========================================
+
+model AuditLogsArchive {
+  id                BigInt   @id @default(autoincrement()) @db.BigInt
+  userId            BigInt?  @map("user_id") @db.BigInt
+  action            String   @db.VarChar(255)
+  modelType         String?  @map("model_type") @db.VarChar(255)
+  modelId           BigInt?  @map("model_id") @db.BigInt
+  oldValues         Json?    @map("old_values")
+  newValues         Json?    @map("new_values")
+  ipAddress         String?  @map("ip_address") @db.VarChar(45)
+  userAgent         String?  @map("user_agent") @db.VarChar(500)
+  archivedAt        DateTime @map("archived_at") @db.Timestamp
+  originalCreatedAt DateTime @map("original_created_at") @db.Timestamp
+  originalUpdatedAt DateTime @map("original_updated_at") @db.Timestamp
+
+  @@index([modelType, modelId, originalCreatedAt])
+  @@index([userId, originalCreatedAt])
+  @@index([action, originalCreatedAt])
+  @@map("audit_logs_archive")
+}
+
+model JiraTableHistoryArchive {
+  id                BigInt    @id @default(autoincrement()) @db.BigInt
+  issuekey          String    @db.VarChar(255)
+  project           String?   @db.VarChar(255)
+  issuetype         String?   @db.VarChar(255)
+  summary           String?   @db.Text
+  description       String?   @db.Text
+  rawJiraData       Json?     @map("raw_jira_data")
+  syncedAt          DateTime? @map("synced_at") @db.Timestamp
+  archivedAt        DateTime  @map("archived_at") @db.Timestamp
+  originalCreatedAt DateTime  @map("original_created_at") @db.Timestamp
+  originalUpdatedAt DateTime  @map("original_updated_at") @db.Timestamp
+
+  @@index([project])
+  @@index([issuetype])
+  @@index([issuekey])
+  @@map("jira_table_history_archive")
+}
+
 // ========================================
 // AUDIT & LOGGING
 // ========================================
 
 model AuditLog {
-  id         BigInt   @id @default(autoincrement()) @db.BigInt
-  userId     BigInt?  @map("user_id") @db.BigInt
-  action     String   @db.VarChar(255)
-  modelType  String?  @map("model_type") @db.VarChar(255)
-  modelId    BigInt?  @map("model_id") @db.BigInt
-  oldValues  Json?    @map("old_values")
-  newValues  Json?    @map("new_values")
-  ipAddress  String?  @map("ip_address") @db.VarChar(45)
-  userAgent  String?  @map("user_agent") @db.VarChar(500)
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
-  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamp
+  id        BigInt   @id @default(autoincrement()) @db.BigInt
+  userId    BigInt?  @map("user_id") @db.BigInt
+  action    String   @db.VarChar(255)
+  modelType String?  @map("model_type") @db.VarChar(255)
+  modelId   BigInt?  @map("model_id") @db.BigInt
+  oldValues Json?    @map("old_values")
+  newValues Json?    @map("new_values")
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  userAgent String?  @map("user_agent") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -782,6 +1238,432 @@ model AuditLog {
   @@index([userId, createdAt])
   @@index([action, createdAt])
   @@map("audit_logs")
+}
+
+// ========================================
+// DECISION LOGGING
+// ========================================
+// Tracks decisions, context, and impact/risk analysis
+
+model DecisionLog {
+  id               BigInt   @id @default(autoincrement()) @db.BigInt
+  title            String   @db.VarChar(255)
+  decisionType     String   @map("decision_type") @db.VarChar(255)
+  decisionOwner    String?  @map("decision_owner") @db.VarChar(255)
+  decisionOwnerId  BigInt?  @map("decision_owner_id") @db.BigInt
+  involvedQa       String?  @map("involved_qa") @db.Text
+  decisionDate     DateTime @map("decision_date") @db.Date
+  sprintRelease    String?  @map("sprint_release") @db.VarChar(255)
+  context          String?  @db.Text
+  decision         String   @db.Text
+  impactRisk       String?  @map("impact_risk") @db.Text
+  status           String   @default("active") @db.VarChar(50)
+  tags             Json?    @map("tags")
+  relatedArtifacts String?  @map("related_artifacts") @db.Text
+  createdBy        BigInt?  @map("created_by") @db.BigInt
+  updatedBy        BigInt?  @map("updated_by") @db.BigInt
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  owner   User? @relation("DecisionLogOwner", fields: [decisionOwnerId], references: [id], onDelete: SetNull)
+  creator User? @relation("DecisionLogCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater User? @relation("DecisionLogUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([decisionType, status])
+  @@index([decisionDate])
+  @@index([status, decisionDate])
+  @@index([decisionOwner])
+  @@index([decisionOwnerId])
+  @@index([createdBy])
+  @@map("decision_logs")
+}
+
+// ========================================
+// METADATA & EXTENSIBILITY
+// ========================================
+// Generic metadata table for custom fields, tags, labels without schema changes
+
+model EntityMetadata {
+  id         BigInt   @id @default(autoincrement()) @db.BigInt
+  entityType String   @map("entity_type") @db.VarChar(255)
+  entityId   BigInt   @map("entity_id") @db.BigInt
+  metaKey    String   @map("meta_key") @db.VarChar(255)
+  metaValue  String   @map("meta_value") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  @@unique([entityType, entityId, metaKey])
+  @@index([entityType, entityId])
+  @@index([metaKey, metaValue])
+  @@map("entity_metadata")
+}
+
+// ========================================
+// PRD REVIEW & REQUIREMENTS
+// ========================================
+// Product Requirements Document review management
+
+model PrdReview {
+  id            BigInt    @id @default(autoincrement()) @db.BigInt
+  requestId     String    @unique @map("request_id") @db.VarChar(255) // Format: REV-{unique_id}
+  title         String    @db.VarChar(500)
+  content       String    @db.Text
+  requesterName String    @map("requester_name") @db.VarChar(255)
+  confluenceUrl String?   @map("confluence_url") @db.VarChar(2048)
+  pageId        String?   @map("page_id") @db.VarChar(255) // Confluence page ID
+  aiReview      String?   @map("ai_review") @db.Text // AI-generated review content
+  status        String    @default("DRAFT") @db.VarChar(50) // DRAFT, PROCESSING, COMPLETED, FINALIZED
+  projectId     BigInt?   @map("project_id") @db.BigInt
+  reviewedBy    BigInt?   @map("reviewed_by") @db.BigInt
+  reviewedAt    DateTime? @map("reviewed_at") @db.Timestamp
+  syncedAt      DateTime? @map("synced_at") @db.Timestamp // Last sync from Google Sheets
+  comments      String?   @db.Text
+  metadata      Json?     @map("metadata") // Additional metadata (status changes, etc.)
+  createdBy     BigInt?   @map("created_by") @db.BigInt
+  updatedBy     BigInt?   @map("updated_by") @db.BigInt
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  project  Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  reviewer User?            @relation("PrdReviewReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  creator  User?            @relation("PrdReviewCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater  User?            @relation("PrdReviewUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+  cache    PrdReviewCache[]
+
+  @@index([requestId])
+  @@index([projectId, status])
+  @@index([status, createdAt])
+  @@index([status, reviewedAt])
+  @@index([reviewedBy, reviewedAt])
+  @@index([createdBy])
+  @@index([requesterName])
+  @@index([title])
+  @@index([syncedAt])
+  @@map("prd_reviews")
+}
+
+model PrdReviewCache {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  prdReviewId BigInt?  @map("prd_review_id") @db.BigInt
+  cacheKey    String   @unique @map("cache_key") @db.VarChar(255)
+  cacheType   String?  @map("cache_type") @db.VarChar(100)
+  data        Json     @map("data")
+  expiresAt   DateTime @map("expires_at") @db.Timestamp
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  prdReview PrdReview? @relation(fields: [prdReviewId], references: [id], onDelete: Cascade)
+
+  @@index([prdReviewId])
+  @@index([cacheKey])
+  @@index([expiresAt])
+  @@index([cacheKey, expiresAt])
+  @@index([prdReviewId, cacheType])
+  @@index([cacheType, expiresAt])
+  @@map("prd_review_cache")
+}
+
+// ========================================
+// ANALYTICS & REPORTING (EXTERNAL INTEGRATIONS)
+// ========================================
+// Allure test reports, GitLab metrics, Jira lead times, monthly contributions
+
+model AllureReport {
+  id                 BigInt    @id @default(autoincrement()) @db.BigInt
+  name               String    @db.VarChar(255)
+  version            String?   @db.VarChar(255)
+  summary            Json?     @map("summary")
+  status             String    @default("pending") @db.VarChar(50)
+  executionStartedAt DateTime? @map("execution_started_at") @db.Timestamp
+  executionStoppedAt DateTime? @map("execution_stopped_at") @db.Timestamp
+  createdBy          BigInt?   @map("created_by") @db.BigInt
+  updatedBy          BigInt?   @map("updated_by") @db.BigInt
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  creator   User?            @relation("AllureReportCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater   User?            @relation("AllureReportUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+  scenarios AllureScenario[]
+
+  @@index([status, createdAt])
+  @@index([executionStartedAt])
+  @@index([name, version])
+  @@index([createdBy])
+  @@map("allure_report")
+}
+
+model AllureScenario {
+  id             BigInt   @id @default(autoincrement()) @db.BigInt
+  allureReportId BigInt   @map("allure_report_id") @db.BigInt
+  name           String   @db.VarChar(255)
+  status         String   @db.VarChar(50)
+  duration       Int?     @db.Integer
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  report AllureReport @relation(fields: [allureReportId], references: [id], onDelete: Cascade)
+  steps  AllureStep[]
+
+  @@index([allureReportId])
+  @@index([allureReportId, status])
+  @@index([status, duration])
+  @@map("allure_scenarios")
+}
+
+model AllureStep {
+  id           BigInt   @id @default(autoincrement()) @db.BigInt
+  scenarioId   BigInt   @map("scenario_id") @db.BigInt
+  name         String   @db.VarChar(255)
+  status       String   @db.VarChar(50)
+  duration     Int?     @db.Integer
+  errorMessage String?  @map("error_message") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  scenario AllureScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId, status])
+  @@index([status, duration])
+  @@map("allure_steps")
+}
+
+model GitlabMrLeadTime {
+  id            BigInt    @id @default(autoincrement()) @db.BigInt
+  projectName   String    @map("project_name") @db.VarChar(255)
+  projectId     BigInt?   @map("project_id") @db.BigInt
+  mrId          String    @map("mr_id") @db.VarChar(255)
+  title         String    @db.VarChar(500)
+  author        String    @db.VarChar(255)
+  authorId      BigInt?   @map("author_id") @db.BigInt
+  mrCreatedAt   DateTime  @map("mr_created_at") @db.Timestamp
+  mergedAt      DateTime? @map("merged_at") @db.Timestamp
+  leadTimeHours Int?      @map("lead_time_hours") @db.Integer
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  authorUser User?    @relation("GitlabMrAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([projectName, mrCreatedAt])
+  @@index([projectId, mrCreatedAt])
+  @@index([author, mrCreatedAt])
+  @@index([authorId, mrCreatedAt])
+  @@index([mergedAt])
+  @@index([projectName, author])
+  @@index([projectId, authorId])
+  @@map("gitlab_mr_lead_times")
+}
+
+model GitlabMrContributor {
+  id            BigInt   @id @default(autoincrement()) @db.BigInt
+  projectName   String   @map("project_name") @db.VarChar(255)
+  projectId     BigInt?  @map("project_id") @db.BigInt
+  username      String   @db.VarChar(255)
+  userId        BigInt?  @map("user_id") @db.BigInt
+  name          String?  @db.VarChar(255)
+  email         String?  @db.VarChar(255)
+  contributions Int      @default(0) @db.Integer
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user    User?    @relation("GitlabMrContributor", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([projectName, username])
+  @@unique([projectId, userId])
+  @@index([projectName, contributions])
+  @@index([projectId, contributions])
+  @@index([username])
+  @@index([userId])
+  @@map("gitlab_mr_contributors")
+}
+
+model JiraLeadTime {
+  id             BigInt    @id @default(autoincrement()) @db.BigInt
+  projectKey     String    @map("project_key") @db.VarChar(255)
+  projectId      BigInt?   @map("project_id") @db.BigInt
+  issueKey       String    @unique @map("issue_key") @db.VarChar(255)
+  bugBudgetId    BigInt?   @map("bug_budget_id") @db.BigInt
+  issueType      String    @map("issue_type") @db.VarChar(255)
+  status         String    @db.VarChar(255)
+  issueCreatedAt DateTime  @map("issue_created_at") @db.Timestamp
+  resolvedAt     DateTime? @map("resolved_at") @db.Timestamp
+  leadTimeHours  Int?      @map("lead_time_hours") @db.Integer
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamp
+
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  bugBudget BugBudget? @relation(fields: [bugBudgetId], references: [id], onDelete: SetNull)
+
+  @@index([projectKey, issueCreatedAt])
+  @@index([projectId, issueCreatedAt])
+  @@index([issueKey])
+  @@index([bugBudgetId])
+  @@index([status, resolvedAt])
+  @@index([projectKey, status])
+  @@index([projectId, status])
+  @@index([issueType, status])
+  @@map("jira_lead_times")
+}
+
+model MonthlyContribution {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  year        Int      @db.Integer
+  month       Int      @db.Integer
+  monthName   String?  @map("month_name") @db.VarChar(50)
+  username    String?  @map("username") @db.VarChar(255)
+  userId      BigInt?  @map("user_id") @db.BigInt
+  name        String?  @db.VarChar(255)
+  squad       String?  @db.VarChar(255)
+  mrCreated   Int      @default(0) @map("mr_created") @db.Integer
+  mrApproved  Int      @default(0) @map("mr_approved") @db.Integer
+  repoPushes  Int      @default(0) @map("repo_pushes") @db.Integer
+  totalEvents Int      @default(0) @map("total_events") @db.Integer
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  user      User?    @relation("MonthlyContributionUser", fields: [userId], references: [id], onDelete: SetNull)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId BigInt?  @map("project_id") @db.BigInt
+
+  @@unique([year, month, username])
+  @@unique([year, month, userId])
+  @@index([year, month])
+  @@index([username, year, month])
+  @@index([userId, year, month])
+  @@index([squad, year, month])
+  @@map("monthly_contributions")
+}
+
+// ========================================
+// CHANGE DATA CAPTURE (CDC)
+// ========================================
+// Tracks all database changes for real-time sync and replication
+
+enum ChangeType {
+  insert
+  update
+  delete
+}
+
+model ChangeLog {
+  id            BigInt     @id @default(autoincrement()) @db.BigInt
+  tableName     String     @map("table_name") @db.VarChar(255)
+  recordId      BigInt     @map("record_id") @db.BigInt
+  changeType    ChangeType @map("change_type")
+  oldValues     Json?      @map("old_values")
+  newValues     Json?      @map("new_values")
+  changedAt     DateTime   @default(now()) @map("changed_at") @db.Timestamp
+  changedBy     BigInt?    @map("changed_by") @db.BigInt
+  transactionId String?    @map("transaction_id") @db.VarChar(255)
+  source        String?    @db.VarChar(100)
+
+  changer User? @relation("ChangeLogChanger", fields: [changedBy], references: [id], onDelete: SetNull)
+
+  @@index([tableName, recordId, changedAt])
+  @@index([changedAt])
+  @@index([changeType, changedAt])
+  @@index([transactionId])
+  @@index([tableName, changeType, changedAt])
+  @@map("change_log")
+}
+
+// ========================================
+// AUDIT EVENTS (EVENT SOURCING)
+// ========================================
+// Event sourcing table for comprehensive audit trail
+// Stores all events as immutable append-only log
+// Enables time-travel queries, event replay, and complete audit history
+
+model AuditEvent {
+  id            BigInt   @id @default(autoincrement()) @db.BigInt
+  eventType     String   @map("event_type") @db.VarChar(255)
+  aggregateType String   @map("aggregate_type") @db.VarChar(255)
+  aggregateId   BigInt   @map("aggregate_id") @db.BigInt
+  userId        BigInt?  @map("user_id") @db.BigInt
+  eventData     Json     @map("event_data")
+  metadata      Json?    @map("metadata")
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamp
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([aggregateType, eventType, occurredAt])
+  @@map("audit_events")
+}
+
+// ========================================
+// WORKFLOW & SAGA PATTERNS
+// ========================================
+// Workflow orchestration for complex multi-step processes
+
+enum SagaStatus {
+  pending
+  in_progress
+  completed
+  failed
+  rolled_back
+}
+
+model WorkflowSaga {
+  id           BigInt     @id @default(autoincrement()) @db.BigInt
+  sagaType     String     @map("saga_type") @db.VarChar(255)
+  currentStep  String     @map("current_step") @db.VarChar(255)
+  status       SagaStatus
+  context      Json       @map("context")
+  startedBy    BigInt?    @map("started_by") @db.BigInt
+  completedAt  DateTime?  @map("completed_at") @db.Timestamp
+  failedAt     DateTime?  @map("failed_at") @db.Timestamp
+  errorMessage String?    @map("error_message") @db.Text
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamp
+
+  starter User? @relation("WorkflowSagaStarter", fields: [startedBy], references: [id], onDelete: SetNull)
+
+  @@index([sagaType, status])
+  @@index([startedBy, status])
+  @@index([status, createdAt])
+  @@map("workflow_sagas")
+}
+
+// ========================================
+// CQRS READ MODELS (ADDITIONAL)
+// ========================================
+// Denormalized bug budget view for fast queries
+
+model BugBudgetView {
+  id                  BigInt    @id @map("id") @db.BigInt
+  jiraKey             String    @map("jira_key") @db.VarChar(255)
+  project             String    @db.VarChar(255)
+  projectId           BigInt?   @map("project_id") @db.BigInt
+  summary             String    @db.Text
+  status              String    @db.VarChar(255)
+  issueType           String    @map("issue_type") @db.VarChar(255)
+  priority            String?   @db.VarChar(255)
+  assigneeFinal       String?   @map("assignee_final") @db.VarChar(255)
+  assigneeId          BigInt?   @map("assignee_id") @db.BigInt
+  sprint              String?   @db.VarChar(255)
+  statusCategory      String?   @map("status_category") @db.VarChar(255)
+  isOpen              Boolean   @map("is_open") @db.Boolean
+  createdDate         DateTime? @map("created_date") @db.Timestamp
+  resolvedDate        DateTime? @map("resolved_date") @db.Timestamp
+  epicName            String?   @map("epic_name") @db.VarChar(255)
+  serviceFeature      String?   @map("service_feature") @db.VarChar(255)
+  resolutionTimeHours Decimal?  @map("resolution_time_hours") @db.Decimal(10, 2)
+  ageDays             Int?      @map("age_days") @db.Integer
+  lastUpdatedAt       DateTime  @updatedAt @map("last_updated_at") @db.Timestamp
+
+  @@index([project, status, isOpen])
+  @@index([projectId, status, isOpen])
+  @@index([assigneeFinal, status])
+  @@index([assigneeId, status])
+  @@index([sprint, statusCategory])
+  @@index([createdDate, resolvedDate])
+  @@index([epicName])
+  @@index([serviceFeature])
+  @@map("bug_budget_view")
 }
 
 // Note: Additional tables like DocumentTemplate, EditorImage, etc. can be added as needed

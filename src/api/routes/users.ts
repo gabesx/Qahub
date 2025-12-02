@@ -12,6 +12,571 @@ import { emailService } from '../../shared/services/email';
 
 const router = Router();
 
+// RBAC Helper Functions
+const GUARD_NAME = 'web';
+
+/**
+ * Get or create a role by name
+ */
+async function getOrCreateRole(roleName: string) {
+  return await prisma.role.upsert({
+    where: {
+      name_guardName: {
+        name: roleName,
+        guardName: GUARD_NAME,
+      },
+    },
+    update: {},
+    create: {
+      name: roleName,
+      guardName: GUARD_NAME,
+    },
+  });
+}
+
+/**
+ * Get or create a permission by name
+ */
+async function getOrCreatePermission(permissionName: string) {
+  return await prisma.permission.upsert({
+    where: {
+      name_guardName: {
+        name: permissionName,
+        guardName: GUARD_NAME,
+      },
+    },
+    update: {},
+    create: {
+      name: permissionName,
+      guardName: GUARD_NAME,
+    },
+  });
+}
+
+/**
+ * Assign role to user and sync permissions
+ */
+async function assignRoleToUser(userId: bigint, roleName: string) {
+  // Get or create role
+  const role = await getOrCreateRole(roleName);
+
+  // Remove existing roles for this user
+  await prisma.userRole.deleteMany({
+    where: { userId },
+  });
+
+  // Assign new role
+  await prisma.userRole.create({
+    data: {
+      userId,
+      roleId: role.id,
+    },
+  });
+
+  // Get all permissions for this role
+  const rolePermissions = await prisma.rolePermission.findMany({
+    where: { roleId: role.id },
+    include: { permission: true },
+  });
+
+  // Remove existing user permissions
+  await prisma.userPermission.deleteMany({
+    where: { userId },
+  });
+
+  // Assign permissions from role to user
+  if (rolePermissions.length > 0) {
+    await prisma.userPermission.createMany({
+      data: rolePermissions.map(rp => ({
+        userId,
+        permissionId: rp.permissionId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  return role;
+}
+
+/**
+ * Assign custom permissions to user
+ */
+async function assignPermissionsToUser(userId: bigint, permissions: string[]) {
+  // Remove existing user permissions
+  await prisma.userPermission.deleteMany({
+    where: { userId },
+  });
+
+  if (permissions.length === 0) {
+    return;
+  }
+
+  // Get or create permissions
+  const permissionRecords = await Promise.all(
+    permissions.map(perm => getOrCreatePermission(perm))
+  );
+
+  // Assign permissions to user
+  await prisma.userPermission.createMany({
+    data: permissionRecords.map(perm => ({
+      userId,
+      permissionId: perm.id,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+// Get user roles
+router.get('/:id/roles', authenticateToken, async (req, res) => {
+  try {
+    const userId = BigInt(req.params.id);
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        userRoles: {
+          include: {
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    res.json({
+      data: {
+        roles: user.userRoles.map((ur) => ({
+          id: ur.role.id.toString(),
+          name: ur.role.name,
+          guardName: ur.role.guardName,
+          assignedAt: ur.createdAt.toISOString(),
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error('Get user roles error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while fetching user roles',
+      },
+    });
+  }
+});
+
+// Assign roles to user
+router.post('/:id/roles', authenticateToken, async (req, res) => {
+  try {
+    const currentUserId = BigInt((req as AuthRequest).user!.userId);
+    const targetUserId = BigInt(req.params.id);
+    const { roleIds } = z.object({
+      roleIds: z.array(z.string()).min(1, 'At least one role ID is required'),
+    }).parse(req.body);
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    // Verify all roles exist
+    const roleBigInts = roleIds.map((id) => BigInt(id));
+    const roles = await prisma.role.findMany({
+      where: {
+        id: { in: roleBigInts },
+      },
+    });
+
+    if (roles.length !== roleIds.length) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_ROLES',
+          message: 'One or more role IDs are invalid',
+        },
+      });
+    }
+
+    // Create user-role assignments (skip if already exists)
+    await prisma.userRole.createMany({
+      data: roleBigInts.map((roleId) => ({
+        userId: targetUserId,
+        roleId,
+      })),
+      skipDuplicates: true,
+    });
+
+    // Create audit log
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: currentUserId,
+          action: 'updated',
+          modelType: 'user',
+          modelId: targetUserId,
+          oldValues: null,
+          newValues: {
+            rolesAssigned: roleIds,
+          },
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError);
+    }
+
+    logger.info(`Roles assigned to user ${targetUserId} by user ${currentUserId}`);
+
+    res.json({
+      message: 'Roles assigned successfully',
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid input data',
+          details: error.errors,
+        },
+      });
+    }
+    logger.error('Assign roles to user error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while assigning roles',
+      },
+    });
+  }
+});
+
+// Remove role from user
+router.delete('/:id/roles/:roleId', authenticateToken, async (req, res) => {
+  try {
+    const currentUserId = BigInt((req as AuthRequest).user!.userId);
+    const targetUserId = BigInt(req.params.id);
+    const roleId = BigInt(req.params.roleId);
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    // Remove role
+    await prisma.userRole.deleteMany({
+      where: {
+        userId: targetUserId,
+        roleId,
+      },
+    });
+
+    // Create audit log
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: currentUserId,
+          action: 'updated',
+          modelType: 'user',
+          modelId: targetUserId,
+          oldValues: {
+            roleRemoved: roleId.toString(),
+          },
+          newValues: null,
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError);
+    }
+
+    logger.info(`Role removed from user ${targetUserId} by user ${currentUserId}`);
+
+    res.json({
+      message: 'Role removed successfully',
+    });
+  } catch (error) {
+    logger.error('Remove role from user error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while removing role',
+      },
+    });
+  }
+});
+
+// Get user permissions
+router.get('/:id/permissions', authenticateToken, async (req, res) => {
+  try {
+    const userId = BigInt(req.params.id);
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        userPermissions: {
+          include: {
+            permission: true,
+          },
+        },
+        userRoles: {
+          include: {
+            role: {
+              include: {
+                rolePermissions: {
+                  include: {
+                    permission: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    // Get direct permissions
+    const directPermissions = user.userPermissions.map((up) => ({
+      id: up.permission.id.toString(),
+      name: up.permission.name,
+      guardName: up.permission.guardName,
+      source: 'direct',
+      assignedAt: up.createdAt.toISOString(),
+    }));
+
+    // Get permissions from roles
+    const rolePermissions = new Map();
+    user.userRoles.forEach((ur) => {
+      ur.role.rolePermissions.forEach((rp) => {
+        const permId = rp.permission.id.toString();
+        if (!rolePermissions.has(permId)) {
+          rolePermissions.set(permId, {
+            id: permId,
+            name: rp.permission.name,
+            guardName: rp.permission.guardName,
+            source: 'role',
+            roleName: ur.role.name,
+          });
+        }
+      });
+    });
+
+    res.json({
+      data: {
+        permissions: {
+          direct: directPermissions,
+          fromRoles: Array.from(rolePermissions.values()),
+          all: [
+            ...directPermissions,
+            ...Array.from(rolePermissions.values()),
+          ],
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Get user permissions error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while fetching user permissions',
+      },
+    });
+  }
+});
+
+// Assign permissions to user
+router.post('/:id/permissions', authenticateToken, async (req, res) => {
+  try {
+    const currentUserId = BigInt((req as AuthRequest).user!.userId);
+    const targetUserId = BigInt(req.params.id);
+    const { permissionIds } = z.object({
+      permissionIds: z.array(z.string()).min(1, 'At least one permission ID is required'),
+    }).parse(req.body);
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    // Verify all permissions exist
+    const permissionBigInts = permissionIds.map((id) => BigInt(id));
+    const permissions = await prisma.permission.findMany({
+      where: {
+        id: { in: permissionBigInts },
+      },
+    });
+
+    if (permissions.length !== permissionIds.length) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_PERMISSIONS',
+          message: 'One or more permission IDs are invalid',
+        },
+      });
+    }
+
+    // Create user-permission assignments (skip if already exists)
+    await prisma.userPermission.createMany({
+      data: permissionBigInts.map((permissionId) => ({
+        userId: targetUserId,
+        permissionId,
+      })),
+      skipDuplicates: true,
+    });
+
+    // Create audit log
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: currentUserId,
+          action: 'updated',
+          modelType: 'user',
+          modelId: targetUserId,
+          oldValues: null,
+          newValues: {
+            permissionsAssigned: permissionIds,
+          },
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError);
+    }
+
+    logger.info(`Permissions assigned to user ${targetUserId} by user ${currentUserId}`);
+
+    res.json({
+      message: 'Permissions assigned successfully',
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid input data',
+          details: error.errors,
+        },
+      });
+    }
+    logger.error('Assign permissions to user error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while assigning permissions',
+      },
+    });
+  }
+});
+
+// Remove permission from user
+router.delete('/:id/permissions/:permissionId', authenticateToken, async (req, res) => {
+  try {
+    const currentUserId = BigInt((req as AuthRequest).user!.userId);
+    const targetUserId = BigInt(req.params.id);
+    const permissionId = BigInt(req.params.permissionId);
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    // Remove permission
+    await prisma.userPermission.deleteMany({
+      where: {
+        userId: targetUserId,
+        permissionId,
+      },
+    });
+
+    // Create audit log
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: currentUserId,
+          action: 'updated',
+          modelType: 'user',
+          modelId: targetUserId,
+          oldValues: {
+            permissionRemoved: permissionId.toString(),
+          },
+          newValues: null,
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError);
+    }
+
+    logger.info(`Permission removed from user ${targetUserId} by user ${currentUserId}`);
+
+    res.json({
+      message: 'Permission removed successfully',
+    });
+  } catch (error) {
+    logger.error('Remove permission from user error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while removing permission',
+      },
+    });
+  }
+});
+
 // Register schema
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -19,6 +584,7 @@ const registerSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
   jobRole: z.string().optional(),
   tenantId: z.string().optional(),
+  role: z.string().optional(), // Role name for RBAC
 });
 
 // Update profile schema
@@ -39,8 +605,11 @@ const listUsersSchema = z.object({
   page: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 1)),
   limit: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 20)),
   search: z.string().optional(),
-  isActive: z.string().optional().transform((val) => val === 'true'),
+  isActive: z.string().optional().transform((val) => (val === 'true' ? true : val === 'false' ? false : undefined)),
+  role: z.string().optional(),
   tenantId: z.string().optional(),
+  sortBy: z.string().optional().default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
 });
 
 // Register new user
@@ -74,6 +643,7 @@ router.post('/register', async (req, res) => {
         jobRole: data.jobRole,
         authProvider: 'email',
         isActive: true,
+        role: data.role || null, // Keep legacy role field for backward compatibility
       },
       select: {
         id: true,
@@ -86,6 +656,17 @@ router.post('/register', async (req, res) => {
         createdAt: true,
       },
     });
+
+    // Assign role via RBAC if provided
+    if (data.role) {
+      try {
+        await assignRoleToUser(user.id, data.role);
+        logger.info(`Assigned role ${data.role} to user ${user.email} via RBAC`);
+      } catch (error) {
+        logger.warn(`Failed to assign role via RBAC: ${error}`);
+        // Continue even if RBAC assignment fails
+      }
+    }
 
     // If tenantId provided, link user to tenant
     if (data.tenantId) {
@@ -225,24 +806,37 @@ router.get('/me/activities', authenticateToken, async (req, res) => {
   try {
     const userId = BigInt((req as any).user.userId);
 
-    const activities = await prisma.auditLog.findMany({
-      where: {
-        userId,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: 20,
-      select: {
-        id: true,
-        action: true,
-        modelType: true,
-        modelId: true,
-        oldValues: true,
-        newValues: true,
-        createdAt: true,
-      },
-    });
+    const { page = '1', limit = '10' } = req.query;
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [activities, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where: {
+          userId,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        skip,
+        take: limitNum,
+        select: {
+          id: true,
+          action: true,
+          modelType: true,
+          modelId: true,
+          oldValues: true,
+          newValues: true,
+          createdAt: true,
+        },
+      }),
+      prisma.auditLog.count({
+        where: {
+          userId,
+        },
+      }),
+    ]);
 
     // Format activities for frontend
     const formattedActivities = activities.map((activity) => {
@@ -282,6 +876,12 @@ router.get('/me/activities', authenticateToken, async (req, res) => {
     res.json({
       data: {
         activities: formattedActivities,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
+        },
       },
     });
   } catch (error) {
@@ -500,15 +1100,7 @@ router.get('/me', authenticateToken, async (req, res) => {
       include: {
         tenantUsers: {
           include: {
-            tenant: {
-              select: {
-                id: true,
-                name: true,
-                slug: true,
-                plan: true,
-                status: true,
-              },
-            },
+            tenant: true,
           },
         },
       },
@@ -878,9 +1470,25 @@ router.post('/change-password', authenticateToken, async (req, res) => {
   }
 });
 
-// List users (admin only - add admin check middleware later)
+// List users (admin only)
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    // Check if user is admin
+    const currentUserId = BigInt((req as any).user.userId);
+    const currentUser = await prisma.user.findUnique({
+      where: { id: currentUserId },
+      select: { role: true },
+    });
+
+    if (currentUser?.role !== 'admin') {
+      return res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Only administrators can access this resource',
+        },
+      });
+    }
+
     const query = listUsersSchema.parse(req.query);
     const page = query.page || 1;
     const limit = Math.min(query.limit || 20, 100); // Max 100 per page
@@ -890,13 +1498,18 @@ router.get('/', authenticateToken, async (req, res) => {
 
     if (query.search) {
       where.OR = [
-        { name: { contains: query.search } },
-        { email: { contains: query.search } },
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { email: { contains: query.search, mode: 'insensitive' } },
+        { role: { contains: query.search, mode: 'insensitive' } },
       ];
     }
 
     if (query.isActive !== undefined) {
       where.isActive = query.isActive;
+    }
+
+    if (query.role) {
+      where.role = query.role;
     }
 
     if (query.tenantId) {
@@ -907,12 +1520,24 @@ router.get('/', authenticateToken, async (req, res) => {
       };
     }
 
+    // Get stats for all users (before filtering)
+    const [totalUsers, activeUsers, inactiveUsers] = await Promise.all([
+      prisma.user.count(),
+      prisma.user.count({ where: { isActive: true } }),
+      prisma.user.count({ where: { isActive: false } }),
+    ]);
+
+    // Build orderBy
+    const orderBy: any = {};
+    const sortField = query.sortBy || 'createdAt';
+    orderBy[sortField] = query.sortOrder || 'desc';
+
     const [users, total] = await Promise.all([
       prisma.user.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         select: {
           id: true,
           name: true,
@@ -947,6 +1572,11 @@ router.get('/', authenticateToken, async (req, res) => {
           total,
           totalPages: Math.ceil(total / limit),
         },
+        stats: {
+          total: totalUsers,
+          active: activeUsers,
+          inactive: inactiveUsers,
+        },
       },
     });
   } catch (error) {
@@ -968,6 +1598,14 @@ router.get('/', authenticateToken, async (req, res) => {
       },
     });
   }
+});
+
+// Update user schema (admin only)
+const updateUserSchema = z.object({
+  name: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  role: z.string().optional(),
+  jobRole: z.string().optional().nullable(),
 });
 
 // Get user by ID
@@ -1025,6 +1663,187 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Update user by ID (admin only)
+router.patch('/:id', authenticateToken, async (req, res) => {
+  try {
+    // Check if user is admin
+    const currentUserId = BigInt((req as any).user.userId);
+    const currentUser = await prisma.user.findUnique({
+      where: { id: currentUserId },
+      select: { role: true },
+    });
+
+    if (currentUser?.role !== 'admin') {
+      return res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Only administrators can update users',
+        },
+      });
+    }
+
+    const targetUserId = BigInt(req.params.id);
+    const data = updateUserSchema.parse(req.body);
+
+    // Check if target user exists
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, name: true, email: true, role: true, jobRole: true },
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    // Build update data
+    const updateData: any = {};
+    if (data.name !== undefined) {
+      updateData.name = data.name;
+    }
+    if (data.email !== undefined) {
+      // Check if email is already taken by another user
+      const existingUser = await prisma.user.findUnique({
+        where: { email: data.email.toLowerCase().trim() },
+      });
+      if (existingUser && existingUser.id !== targetUserId) {
+        return res.status(409).json({
+          error: {
+            code: 'EMAIL_EXISTS',
+            message: 'Email address is already in use',
+          },
+        });
+      }
+      updateData.email = data.email.toLowerCase().trim();
+    }
+    if (data.role !== undefined) {
+      updateData.role = data.role || null;
+    }
+    if (data.jobRole !== undefined) {
+      updateData.jobRole = data.jobRole || null;
+    }
+
+    // Update user
+    const updatedUser = await prisma.user.update({
+      where: { id: targetUserId },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        avatar: true,
+        jobRole: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    // Update RBAC role if role was changed
+    if (data.role !== undefined) {
+      try {
+        if (data.role) {
+          await assignRoleToUser(targetUserId, data.role);
+          logger.info(`Updated RBAC role to ${data.role} for user ${updatedUser.email}`);
+        } else {
+          // Remove all roles and permissions if role is cleared
+          await prisma.userRole.deleteMany({
+            where: { userId: targetUserId },
+          });
+          await prisma.userPermission.deleteMany({
+            where: { userId: targetUserId },
+          });
+          logger.info(`Removed all RBAC roles and permissions for user ${updatedUser.email}`);
+        }
+      } catch (error) {
+        logger.warn(`Failed to update RBAC role: ${error}`);
+        // Continue even if RBAC update fails
+      }
+    }
+
+    // Create audit log
+    try {
+      const oldValues: any = {};
+      const newValues: any = {};
+      
+      if (data.name !== undefined) {
+        oldValues.name = targetUser.name;
+        newValues.name = updatedUser.name;
+      }
+      if (data.email !== undefined) {
+        oldValues.email = targetUser.email;
+        newValues.email = updatedUser.email;
+      }
+      if (data.role !== undefined) {
+        oldValues.role = targetUser.role;
+        newValues.role = updatedUser.role;
+      }
+      if (data.jobRole !== undefined) {
+        oldValues.jobRole = targetUser.jobRole;
+        newValues.jobRole = updatedUser.jobRole;
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          userId: currentUserId,
+          action: 'updated',
+          modelType: 'user',
+          modelId: targetUserId,
+          oldValues: Object.keys(oldValues).length > 0 ? oldValues : null,
+          newValues: Object.keys(newValues).length > 0 ? newValues : null,
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError);
+    }
+
+    logger.info(`User updated by admin: ${updatedUser.email}`);
+
+    res.json({
+      data: {
+        user: {
+          id: updatedUser.id.toString(),
+          name: updatedUser.name,
+          email: updatedUser.email,
+          role: updatedUser.role,
+          avatar: updatedUser.avatar,
+          jobRole: updatedUser.jobRole,
+          isActive: updatedUser.isActive,
+          lastLoginAt: updatedUser.lastLoginAt,
+          createdAt: updatedUser.createdAt,
+          updatedAt: updatedUser.updatedAt,
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid input',
+          details: error.errors,
+        },
+      });
+    }
+
+    logger.error('Update user error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while updating user',
+      },
+    });
+  }
+});
+
 // ========================================
 // USER DEACTIVATION/REACTIVATION
 // ========================================
@@ -1050,9 +1869,20 @@ router.post('/:id/deactivate', authenticateToken, async (req, res) => {
       });
     }
 
+    // Prevent self-deactivation
+    if (currentUserId === targetUserId) {
+      return res.status(400).json({
+        error: {
+          code: 'CANNOT_DEACTIVATE_SELF',
+          message: 'You cannot deactivate your own account',
+        },
+      });
+    }
+
     // Get target user
     const targetUser = await prisma.user.findUnique({
       where: { id: targetUserId },
+      select: { id: true, email: true, name: true, role: true, isActive: true },
     });
 
     if (!targetUser) {
@@ -1073,6 +1903,25 @@ router.post('/:id/deactivate', authenticateToken, async (req, res) => {
       });
     }
 
+    // If target user is admin, ensure at least one other active admin exists
+    if (targetUser.role === 'admin') {
+      const activeAdminCount = await prisma.user.count({
+        where: {
+          role: 'admin',
+          isActive: true,
+        },
+      });
+
+      if (activeAdminCount <= 1) {
+        return res.status(400).json({
+          error: {
+            code: 'LAST_ADMIN',
+            message: 'Cannot deactivate the last active administrator. At least one admin must remain active.',
+          },
+        });
+      }
+    }
+
     // Deactivate user
     await prisma.user.update({
       where: { id: targetUserId },
@@ -1086,8 +1935,16 @@ router.post('/:id/deactivate', authenticateToken, async (req, res) => {
         action: 'deactivated_user',
         modelType: 'user',
         modelId: targetUserId,
-        oldValues: { isActive: true },
-        newValues: { isActive: false },
+        oldValues: { 
+          isActive: true,
+          name: targetUser.name,
+          email: targetUser.email,
+        },
+        newValues: { 
+          isActive: false,
+          name: targetUser.name,
+          email: targetUser.email,
+        },
         ipAddress: req.ip || req.socket.remoteAddress || null,
         userAgent: req.get('user-agent') || null,
       },
@@ -1163,11 +2020,19 @@ router.post('/:id/activate', authenticateToken, async (req, res) => {
     await prisma.auditLog.create({
       data: {
         userId: currentUserId,
-        action: 'reactivated_user',
+        action: 'activated_user',
         modelType: 'user',
         modelId: targetUserId,
-        oldValues: { isActive: false },
-        newValues: { isActive: true },
+        oldValues: { 
+          isActive: false,
+          name: targetUser.name,
+          email: targetUser.email,
+        },
+        newValues: { 
+          isActive: true,
+          name: targetUser.name,
+          email: targetUser.email,
+        },
         ipAddress: req.ip || req.socket.remoteAddress || null,
         userAgent: req.get('user-agent') || null,
       },

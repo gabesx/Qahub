@@ -20,6 +20,7 @@ export default function AppHeader() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showMainMenu, setShowMainMenu] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -34,9 +35,21 @@ export default function AppHeader() {
         if (response.data?.data?.user) {
           setUser(response.data.data.user)
         }
-      } catch (error) {
-        console.error('Error fetching user:', error)
-        router.push('/')
+      } catch (error: any) {
+        // Only redirect on authentication errors (401), not network errors
+        // Network errors (ERR_CONNECTION_REFUSED, ERR_NETWORK) mean the server is down
+        // and should be handled gracefully without redirecting
+        if (error.response?.status === 401) {
+          // Authentication error - redirect to login
+          router.push('/')
+        } else if (error.code === 'ERR_NETWORK' || error.code === 'ERR_CONNECTION_REFUSED') {
+          // Network error - server is likely down, just log silently
+          // Don't redirect, let the user see the page even if data can't load
+          console.warn('Backend server is not available. Please ensure the server is running on port 3001.')
+        } else {
+          // Other errors - log but don't redirect
+          console.error('Error fetching user:', error)
+        }
       } finally {
         setIsLoading(false)
       }
@@ -45,24 +58,25 @@ export default function AppHeader() {
     fetchUser()
   }, [router])
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (showUserMenu) {
-        const target = event.target as HTMLElement
-        if (!target.closest('[data-user-menu]')) {
-          setShowUserMenu(false)
-        }
+      const target = event.target as HTMLElement
+      if (showUserMenu && !target.closest('[data-user-menu]')) {
+        setShowUserMenu(false)
+      }
+      if (showMainMenu && !target.closest('[data-main-menu]')) {
+        setShowMainMenu(false)
       }
     }
 
-    if (showUserMenu) {
+    if (showUserMenu || showMainMenu) {
       document.addEventListener('mousedown', handleClickOutside)
       return () => {
         document.removeEventListener('mousedown', handleClickOutside)
       }
     }
-  }, [showUserMenu])
+  }, [showUserMenu, showMainMenu])
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -96,6 +110,91 @@ export default function AppHeader() {
               >
                 Dashboard
               </Link>
+              <Link
+                href="/projects"
+                className={`text-sm font-medium px-4 py-2 rounded-lg transition-all ${
+                  isActive('/projects')
+                    ? 'text-primary-700 bg-primary-50 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                Projects
+              </Link>
+              
+              {/* Main Menu Dropdown */}
+              <div className="relative" data-main-menu>
+                <button
+                  onClick={() => setShowMainMenu(!showMainMenu)}
+                  className={`text-sm font-medium px-4 py-2 rounded-lg transition-all flex items-center space-x-1 ${
+                    showMainMenu
+                      ? 'text-primary-700 bg-primary-50 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                >
+                  <span>Menu</span>
+                  <svg
+                    className={`w-4 h-4 transition-transform ${showMainMenu ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Dropdown Menu */}
+                {showMainMenu && (
+                  <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 overflow-hidden">
+                    <div className="py-1">
+                      <button
+                        onClick={() => setShowMainMenu(false)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
+                        disabled
+                        title="Coming Soon"
+                      >
+                        <span className="font-medium">All Project</span>
+                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
+                      </button>
+                      <button
+                        onClick={() => setShowMainMenu(false)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
+                        disabled
+                        title="Coming Soon"
+                      >
+                        <span className="font-medium">Squad</span>
+                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
+                      </button>
+                      <button
+                        onClick={() => setShowMainMenu(false)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
+                        disabled
+                        title="Coming Soon"
+                      >
+                        <span className="font-medium">Test Plans</span>
+                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
+                      </button>
+                      <button
+                        onClick={() => setShowMainMenu(false)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
+                        disabled
+                        title="Coming Soon"
+                      >
+                        <span className="font-medium">Test Runs</span>
+                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
+                      </button>
+                      <button
+                        onClick={() => setShowMainMenu(false)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
+                        disabled
+                        title="Coming Soon"
+                      >
+                        <span className="font-medium">Documents</span>
+                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </nav>
           </div>
           <div className="flex items-center space-x-3 relative" data-user-menu>
