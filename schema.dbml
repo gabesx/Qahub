@@ -59,9 +59,10 @@ Table users {
 // NOTE: Security best practice: Revoke all personal_access_tokens when password is reset
 // Application-level relationships:
 // - password_resets.user_id → users.id (FK)
-// - password_history.password_reset_id → password_resets (optional tracking)
+// - password_history.password_reset_id → password_resets.id (optional tracking)
 // - personal_access_tokens should be revoked when password_resets.used_at is set
 Table password_resets {
+  id bigint [pk, increment]
   email varchar [note: 'Email address for password reset - kept for compatibility']
   user_id bigint [ref: > users.id, null, note: 'FK to users.id - primary relationship, on delete cascade']
   token varchar [unique]
