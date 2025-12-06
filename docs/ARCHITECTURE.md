@@ -519,5 +519,5 @@ See [DECISIONS.md](./DECISIONS.md) for detailed decision records:
 
 ---
 
-**Last Updated:** 2024-12-02
+**Last Updated:** 2025-12-02
 

@@ -4,6 +4,7 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 apps/web/node_modules/
+.cursor/rules/dev
 
 # Build output
 dist/
