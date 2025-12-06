@@ -49,7 +49,7 @@ export default function ProjectsPage() {
   const [stats, setStats] = useState<Stats>({ projects: 0, squads: 0, testPlans: 0, testRuns: 0 })
   const [pagination, setPagination] = useState<Pagination>({
     page: 1,
-    limit: 12,
+    limit: 10,
     total: 0,
     totalPages: 0,
   })
@@ -121,14 +121,70 @@ export default function ProjectsPage() {
       const response = await api.get('/projects', { params })
       
       if (response.data?.data) {
-        const projectsData = (response.data.data.projects || []).map((project: Project) => ({
-          ...project,
-          // Calculate test cases as sum of test plans (approximation)
-          // In a real scenario, this would come from the API
-          testCases: project.counts.testPlans * 25, // Placeholder calculation
-          // Calculate automation percentage (placeholder - would need actual data)
-          automatedPercent: Math.floor(Math.random() * 15), // Placeholder: 0-15%
-        }))
+        const projects = response.data.data.projects || []
+        
+        // Fetch repositories for each project to calculate test cases
+        const projectsData = await Promise.all(
+          projects.map(async (project: Project) => {
+            try {
+              // Fetch repositories for this project
+              const reposResponse = await api.get(`/projects/${project.id}/repositories`)
+              const repositories = reposResponse.data?.data?.repositories || []
+              
+              // If no repositories, return 0
+              if (!repositories || repositories.length === 0) {
+                return {
+                  ...project,
+                  testCases: 0,
+                  automatedPercent: 0,
+                }
+              }
+              
+              // Calculate total test cases from all repositories
+              const totalTestCases = repositories.reduce((sum: number, repo: any) => {
+                const testCases = repo.counts?.testCases || 0
+                return sum + (Number.isNaN(testCases) ? 0 : Number(testCases))
+              }, 0)
+              
+              // If no test cases, return 0
+              if (totalTestCases === 0) {
+                return {
+                  ...project,
+                  testCases: 0,
+                  automatedPercent: 0,
+                }
+              }
+              
+              // Calculate automated test cases
+              const automatedTestCases = repositories.reduce((sum: number, repo: any) => {
+                const total = repo.counts?.testCases || 0
+                const automation = repo.counts?.automation || 0
+                const automated = Math.round((total * automation) / 100)
+                return sum + (Number.isNaN(automated) ? 0 : Number(automated))
+              }, 0)
+              
+              // Calculate automation percentage
+              const automatedPercent = totalTestCases > 0 && automatedTestCases >= 0
+                ? Math.round((automatedTestCases / totalTestCases) * 100)
+                : 0
+              
+              return {
+                ...project,
+                testCases: totalTestCases || 0,
+                automatedPercent: automatedPercent || 0,
+              }
+            } catch (err: any) {
+              // If fetching repositories fails, use defaults
+              console.error(`Error fetching repositories for project ${project.id}:`, err)
+              return {
+                ...project,
+                testCases: 0,
+                automatedPercent: 0,
+              }
+            }
+          })
+        )
+        
         setProjects(projectsData)
         if (response.data.data.pagination) {
           setPagination(prev => ({
@@ -346,19 +402,6 @@ export default function ProjectsPage() {
                     {openActionsDropdown === project.id && (
                       <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-10 py-1">
                         <Link
-                          href={`/projects/${project.id}`}
-                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                          onClick={() => setOpenActionsDropdown(null)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                            View Project
-                          </div>
-                        </Link>
-                        <Link
                           href={`/projects/${project.id}/edit`}
                           className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setOpenActionsDropdown(null)}
@@ -498,8 +541,8 @@ export default function ProjectsPage() {
                       ></div>
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600">Automated: {project.automatedPercent || 0}%</span>
-                      <span className="text-gray-600">Manual: {100 - (project.automatedPercent || 0)}%</span>
+                      <span className="text-gray-600">Automated: {project.testCases && project.testCases > 0 ? (project.automatedPercent || 0) : 0}%</span>
+                      <span className="text-gray-600">Manual: {project.testCases && project.testCases > 0 ? (100 - (project.automatedPercent || 0)) : 0}%</span>
                     </div>
                   </div>
 
@@ -542,6 +585,8 @@ export default function ProjectsPage() {
                         <option value={12}>12</option>
                         <option value={24}>24</option>
                         <option value={48}>48</option>
+                        <option value={100}>100</option>
+                        <option value={200}>200</option>
                       </select>
                     </div>
                   </div>

@@ -132,6 +132,35 @@ router.get('/test-runs/:testRunId/comments', authenticateToken, async (req, res)
 
     const userMap = new Map(users.map((u) => [u.id.toString(), u]));
 
+    // Fetch attachments for each comment
+    const commentIds = comments.map(c => c.id);
+    const attachments = commentIds.length > 0 ? await prisma.testRunAttachment.findMany({
+      where: {
+        commentId: { in: commentIds },
+      },
+      select: {
+        id: true,
+        url: true,
+        commentId: true,
+        createdAt: true,
+      },
+    }) : [];
+
+    const attachmentsByCommentId = new Map<string, any[]>();
+    attachments.forEach(att => {
+      if (att.commentId) {
+        const commentIdStr = att.commentId.toString();
+        if (!attachmentsByCommentId.has(commentIdStr)) {
+          attachmentsByCommentId.set(commentIdStr, []);
+        }
+        attachmentsByCommentId.get(commentIdStr)!.push({
+          id: att.id.toString(),
+          url: att.url,
+          createdAt: att.createdAt.toISOString(),
+        });
+      }
+    });
+
     res.json({
       data: {
         comments: comments.map((c) => {
@@ -149,6 +178,7 @@ router.get('/test-runs/:testRunId/comments', authenticateToken, async (req, res)
               name: user.name,
               email: user.email,
             } : null,
+            attachments: attachmentsByCommentId.get(c.id.toString()) || [],
             createdAt: c.createdAt.toISOString(),
             updatedAt: c.updatedAt.toISOString(),
           };

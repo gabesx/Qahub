@@ -233,7 +233,7 @@ router.post('/', authenticateToken, async (req, res) => {
           action: 'created',
           modelType: 'role',
           modelId: role.id,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             name: role.name,
             guardName: role.guardName,
@@ -442,7 +442,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             name: role.name,
             guardName: role.guardName,
           },
-          newValues: null,
+          newValues: undefined,
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },
@@ -524,7 +524,7 @@ router.post('/:id/permissions', authenticateToken, async (req, res) => {
           action: 'updated',
           modelType: 'role',
           modelId: roleId,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             permissionsAssigned: permissionIds,
           },
@@ -601,7 +601,7 @@ router.delete('/:id/permissions/:permissionId', authenticateToken, async (req, r
           oldValues: {
             permissionRemoved: permissionId.toString(),
           },
-          newValues: null,
+          newValues: undefined,
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },

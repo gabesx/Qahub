@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../shared/infrastructure/database';
 import bcrypt from 'bcrypt';
 import { logger } from '../../shared/utils/logger';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, AuthRequest } from '../middleware/auth';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -100,7 +100,10 @@ async function assignRoleToUser(userId: bigint, roleName: string) {
 
 /**
  * Assign custom permissions to user
+ * @deprecated Not currently used, kept for future use
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// @ts-expect-error - Function kept for future use, intentionally unused
 async function assignPermissionsToUser(userId: bigint, permissions: string[]) {
   // Remove existing user permissions
   await prisma.userPermission.deleteMany({
@@ -113,12 +116,12 @@ async function assignPermissionsToUser(userId: bigint, permissions: string[]) {
 
   // Get or create permissions
   const permissionRecords = await Promise.all(
-    permissions.map(perm => getOrCreatePermission(perm))
+    permissions.map((perm: string) => getOrCreatePermission(perm))
   );
 
   // Assign permissions to user
   await prisma.userPermission.createMany({
-    data: permissionRecords.map(perm => ({
+    data: permissionRecords.map((perm: { id: bigint }) => ({
       userId,
       permissionId: perm.id,
     })),
@@ -229,7 +232,7 @@ router.post('/:id/roles', authenticateToken, async (req, res) => {
           action: 'updated',
           modelType: 'user',
           modelId: targetUserId,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             rolesAssigned: roleIds,
           },
@@ -306,7 +309,7 @@ router.delete('/:id/roles/:roleId', authenticateToken, async (req, res) => {
           oldValues: {
             roleRemoved: roleId.toString(),
           },
-          newValues: null,
+          newValues: undefined,
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },
@@ -475,7 +478,7 @@ router.post('/:id/permissions', authenticateToken, async (req, res) => {
           action: 'updated',
           modelType: 'user',
           modelId: targetUserId,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             permissionsAssigned: permissionIds,
           },
@@ -552,7 +555,7 @@ router.delete('/:id/permissions/:permissionId', authenticateToken, async (req, r
           oldValues: {
             permissionRemoved: permissionId.toString(),
           },
-          newValues: null,
+          newValues: undefined,
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },
@@ -772,7 +775,7 @@ if (!fs.existsSync(avatarDir)) {
 }
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: (_req, _file, cb) => {
     cb(null, avatarDir);
   },
   filename: (req, file, cb) => {
@@ -788,7 +791,7 @@ const upload = multer({
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10), // 10MB default
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (_req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = allowedTypes.test(file.mimetype);
@@ -943,7 +946,7 @@ router.post('/me/avatar', authenticateToken, upload.single('avatar'), async (req
           action: 'uploaded_avatar',
           modelType: 'user_profile',
           modelId: userId,
-          oldValues: oldAvatar ? { avatar: oldAvatar } : null,
+          oldValues: oldAvatar ? { avatar: oldAvatar } : undefined,
           newValues: { avatar: fullAvatarUrl },
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
@@ -1047,8 +1050,8 @@ router.delete('/me/avatar', authenticateToken, async (req, res) => {
           action: 'removed_avatar',
           modelType: 'user_profile',
           modelId: userId,
-          oldValues: oldAvatar ? { avatar: oldAvatar } : null,
-          newValues: { avatar: null },
+          oldValues: oldAvatar ? { avatar: oldAvatar } : undefined,
+          newValues: { avatar: null as any },
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },

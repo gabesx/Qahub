@@ -39,6 +39,7 @@ async function getUserPrimaryTenant(userId: bigint): Promise<bigint | null> {
 const createAttachmentSchema = z.object({
   url: z.string().url('URL must be a valid URL').max(500, 'URL must be less than 500 characters'),
   testCaseId: z.string().min(1, 'Test case ID is required'),
+  commentId: z.string().optional().nullable(), // Optional comment ID to link attachment to comment
 });
 
 // List attachments schema
@@ -139,10 +140,11 @@ router.get('/test-runs/:testRunId/attachments', authenticateToken, async (req, r
           return {
             id: a.id.toString(),
             url: a.url,
-            testCase: {
+            testCase: a.testCase ? {
               id: a.testCase.id.toString(),
               title: a.testCase.title,
-            },
+            } : null,
+            commentId: a.commentId?.toString() || null,
             uploadedBy: uploadedByUser ? {
               id: uploadedByUser.id.toString(),
               name: uploadedByUser.name,
@@ -249,6 +251,7 @@ router.post('/test-runs/:testRunId/attachments', authenticateToken, async (req, 
         testCaseId: BigInt(data.testCaseId),
         url: data.url.trim(),
         uploadedBy: userId,
+        commentId: data.commentId ? BigInt(data.commentId) : null,
       },
       include: {
         testCase: {
@@ -289,10 +292,11 @@ router.post('/test-runs/:testRunId/attachments', authenticateToken, async (req, 
         attachment: {
           id: attachment.id.toString(),
           url: attachment.url,
-          testCase: {
+          testCase: attachment.testCase ? {
             id: attachment.testCase.id.toString(),
             title: attachment.testCase.title,
-          },
+          } : null,
+          commentId: attachment.commentId?.toString() || null,
           uploadedBy: {
             id: userId.toString(),
           },

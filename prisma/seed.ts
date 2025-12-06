@@ -146,8 +146,8 @@ async function main() {
       slug: 'default',
       plan: 'free',
       status: 'active',
-      maxUsers: 5,
-      maxProjects: 3,
+      maxUsers: 100,
+      maxProjects: 50,
       features: {
         analytics: true,
         api_access: false,

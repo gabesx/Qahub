@@ -234,7 +234,7 @@ router.post('/', authenticateToken, async (req, res) => {
           action: 'created',
           modelType: 'permission',
           modelId: permission.id,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             name: permission.name,
             guardName: permission.guardName,
@@ -444,7 +444,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             name: permission.name,
             guardName: permission.guardName,
           },
-          newValues: null,
+          newValues: undefined,
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },

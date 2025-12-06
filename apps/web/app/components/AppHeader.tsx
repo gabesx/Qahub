@@ -21,8 +21,16 @@ export default function AppHeader() {
   const [isLoading, setIsLoading] = useState(true)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showMainMenu, setShowMainMenu] = useState(false)
+  const [menuClickCount, setMenuClickCount] = useState(0)
+  const [showMenuButton, setShowMenuButton] = useState(false)
 
   useEffect(() => {
+    // Check if menu should be shown from localStorage
+    const savedMenuState = localStorage.getItem('showMenuButton')
+    if (savedMenuState === 'true') {
+      setShowMenuButton(true)
+    }
+    
     const token = localStorage.getItem('token')
     if (!token) {
       router.push('/')
@@ -88,47 +96,75 @@ export default function AppHeader() {
     return pathname === path
   }
 
+  const handleQaHubClick = () => {
+    const newCount = menuClickCount + 1
+    setMenuClickCount(newCount)
+    
+    if (newCount >= 7) {
+      setShowMenuButton(true)
+      localStorage.setItem('showMenuButton', 'true')
+    }
+  }
+
+  const handleHideMenu = () => {
+    setShowMenuButton(false)
+    setShowMainMenu(false)
+    localStorage.removeItem('showMenuButton')
+    setMenuClickCount(0)
+  }
+
   return (
-    <header className="bg-white border-b border-gray-200 shadow-sm">
+    <header className="bg-gradient-to-r from-green-50 via-emerald-50 to-green-50 border-b border-green-200/50 shadow-md backdrop-blur-sm relative z-[100]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center space-x-6">
-            <Link href="/dashboard" className="flex items-center group">
-              <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center mr-3 shadow-md group-hover:shadow-lg transition-shadow">
+            <div className="flex items-center group">
+              <Link href="/dashboard" className="flex items-center">
+                <div className="w-11 h-11 bg-gradient-to-br from-primary-500 via-primary-600 to-primary-700 rounded-xl flex items-center justify-center mr-3 shadow-lg group-hover:shadow-xl group-hover:scale-105 transition-all duration-200 ring-2 ring-primary-100">
                 <span className="text-white text-lg font-bold">Q</span>
               </div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">QaHub</h1>
+                <h1 
+                  className="text-xl font-bold bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 bg-clip-text text-transparent tracking-tight"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    handleQaHubClick()
+                  }}
+                >
+                  QaHub
+                </h1>
             </Link>
+            </div>
             <nav className="flex space-x-1">
               <Link
                 href="/dashboard"
-                className={`text-sm font-medium px-4 py-2 rounded-lg transition-all ${
+                className={`text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 ${
                   isActive('/dashboard')
-                    ? 'text-primary-700 bg-primary-50 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    ? 'text-primary-700 bg-white shadow-md border border-primary-200/50 font-semibold'
+                    : 'text-gray-700 hover:text-primary-600 hover:bg-white/80 hover:shadow-sm'
                 }`}
               >
                 Dashboard
               </Link>
               <Link
                 href="/projects"
-                className={`text-sm font-medium px-4 py-2 rounded-lg transition-all ${
+                className={`text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 ${
                   isActive('/projects')
-                    ? 'text-primary-700 bg-primary-50 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    ? 'text-primary-700 bg-white shadow-md border border-primary-200/50 font-semibold'
+                    : 'text-gray-700 hover:text-primary-600 hover:bg-white/80 hover:shadow-sm'
                 }`}
               >
                 Projects
               </Link>
               
               {/* Main Menu Dropdown */}
+              {showMenuButton && (
               <div className="relative" data-main-menu>
                 <button
                   onClick={() => setShowMainMenu(!showMainMenu)}
-                  className={`text-sm font-medium px-4 py-2 rounded-lg transition-all flex items-center space-x-1 ${
+                    className={`text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 flex items-center space-x-1 ${
                     showMainMenu
-                      ? 'text-primary-700 bg-primary-50 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                        ? 'text-primary-700 bg-white shadow-md border border-primary-200/50 font-semibold'
+                        : 'text-gray-700 hover:text-primary-600 hover:bg-white/80 hover:shadow-sm'
                   }`}
                 >
                   <span>Menu</span>
@@ -144,72 +180,101 @@ export default function AppHeader() {
 
                 {/* Dropdown Menu */}
                 {showMainMenu && (
-                  <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 overflow-hidden">
+                  <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-xl shadow-2xl border border-gray-200/80 z-50 overflow-hidden backdrop-blur-sm">
                     <div className="py-1">
-                      <button
+                      <Link
+                        href="/projects"
                         onClick={() => setShowMainMenu(false)}
-                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
-                        disabled
-                        title="Coming Soon"
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-all duration-150 flex items-center justify-between group"
                       >
                         <span className="font-medium">All Project</span>
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
-                      </button>
-                      <button
+                        <svg className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                      <Link
+                        href="/squads"
                         onClick={() => setShowMainMenu(false)}
-                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
-                        disabled
-                        title="Coming Soon"
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-all duration-150 flex items-center justify-between group"
                       >
-                        <span className="font-medium">Squad</span>
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
-                      </button>
-                      <button
+                        <span className="font-medium">All Squad</span>
+                        <svg className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                      <Link
+                        href="/test-plans"
                         onClick={() => setShowMainMenu(false)}
-                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
-                        disabled
-                        title="Coming Soon"
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-all duration-150 flex items-center justify-between group"
                       >
-                        <span className="font-medium">Test Plans</span>
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
-                      </button>
-                      <button
+                        <span className="font-medium">All Test Plans</span>
+                        <svg className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                      <Link
+                        href="/test-runs"
                         onClick={() => setShowMainMenu(false)}
-                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
-                        disabled
-                        title="Coming Soon"
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-all duration-150 flex items-center justify-between group"
                       >
-                        <span className="font-medium">Test Runs</span>
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
-                      </button>
-                      <button
+                        <span className="font-medium">All Test Runs</span>
+                        <svg className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                      <Link
+                        href="/repositories"
                         onClick={() => setShowMainMenu(false)}
-                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between group cursor-not-allowed opacity-75"
-                        disabled
-                        title="Coming Soon"
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-all duration-150 flex items-center justify-between group"
+                      >
+                        <span className="font-medium">All Test Cases</span>
+                        <svg className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                      <Link
+                        href="/documents"
+                        onClick={() => setShowMainMenu(false)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-all duration-150 flex items-center justify-between group"
                       >
                         <span className="font-medium">Documents</span>
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Coming Soon</span>
+                        <svg className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                      <div className="border-t border-gray-200 my-1"></div>
+                      <button
+                        onClick={() => {
+                          handleHideMenu()
+                          setShowMainMenu(false)
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-500 hover:bg-red-50 hover:text-red-600 transition-all duration-150 flex items-center justify-between group"
+                      >
+                        <span className="font-medium">Hide Menu</span>
+                        <svg className="w-4 h-4 text-gray-400 group-hover:text-red-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
                       </button>
                     </div>
                   </div>
                 )}
               </div>
+              )}
             </nav>
           </div>
-          <div className="flex items-center space-x-3 relative" data-user-menu>
+          <div className="flex items-center space-x-3 relative z-[100]" data-user-menu>
             {/* Notifications Icon */}
-            <button className="relative text-gray-600 hover:text-gray-900 p-2 rounded-lg hover:bg-gray-100 transition-colors">
+            <button className="relative text-gray-600 hover:text-primary-600 p-2 rounded-lg hover:bg-white/80 hover:shadow-sm transition-all duration-200">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
-              <span className="absolute top-1 right-1 w-2 h-2 bg-primary-500 rounded-full"></span>
+              <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-primary-500 rounded-full ring-2 ring-white"></span>
             </button>
 
             {/* User Menu Button */}
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center space-x-2 text-gray-700 hover:text-gray-900 focus:outline-none p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              className="flex items-center space-x-2 text-gray-700 hover:text-gray-900 focus:outline-none p-1.5 rounded-lg hover:bg-white/80 hover:shadow-sm transition-all duration-200"
               data-user-menu-button
             >
               {user?.avatar ? (
@@ -242,11 +307,11 @@ export default function AppHeader() {
             {/* Dropdown Menu */}
             {showUserMenu && (
               <div 
-                className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 z-[101] overflow-hidden"
+                className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-200/80 z-[9999] overflow-hidden backdrop-blur-sm"
                 data-user-menu-dropdown
               >
                   {/* User Info Block */}
-                  <div className="p-5 bg-gradient-to-br from-gray-50 to-white border-b border-gray-200">
+                  <div className="p-5 bg-gradient-to-br from-gray-50 to-white border-b border-gray-200 relative z-[10000]">
                     <div className="flex items-center space-x-3">
                       {user?.avatar ? (
                         <img

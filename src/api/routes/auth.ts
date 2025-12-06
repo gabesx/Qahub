@@ -67,6 +67,7 @@ router.post('/login', async (req, res) => {
 
     // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET || 'your-secret-key-change-this';
+    const expiresIn = (process.env.JWT_EXPIRES_IN || '7d') as string;
     const token = jwt.sign(
       {
         userId: user.id.toString(),
@@ -75,8 +76,8 @@ router.post('/login', async (req, res) => {
       },
       jwtSecret,
       {
-        expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-      }
+        expiresIn: expiresIn,
+      } as jwt.SignOptions
     );
 
     // Generate remember token if "Remember Me" is checked

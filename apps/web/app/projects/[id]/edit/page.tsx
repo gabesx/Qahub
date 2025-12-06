@@ -61,7 +61,30 @@ export default function EditProjectPage() {
       
       if (response.data?.data?.project) {
         const projectData = response.data.data.project
-        setProject(projectData)
+        
+        // Fetch repositories to calculate total test cases
+        try {
+          const reposResponse = await api.get(`/projects/${projectId}/repositories`)
+          const repositories = reposResponse.data?.data?.repositories || []
+          
+          // Calculate total test cases from all repositories
+          const totalTestCases = repositories.reduce((sum: number, repo: any) => {
+            const testCases = repo.counts?.testCases || 0
+            return sum + (Number.isNaN(testCases) ? 0 : Number(testCases))
+          }, 0)
+          
+          setProject({
+            ...projectData,
+            testCases: totalTestCases,
+          })
+        } catch (repoErr) {
+          // If repositories fetch fails, still set project but with 0 test cases
+          setProject({
+            ...projectData,
+            testCases: 0,
+          })
+        }
+        
         setFormData({
           title: projectData.title || '',
           description: projectData.description || '',
@@ -341,136 +364,56 @@ export default function EditProjectPage() {
           <div className="lg:col-span-1 space-y-6">
             {/* Project Information */}
             {project && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg border border-gray-200/80 p-6">
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-200">
+                  <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl flex items-center justify-center shadow-md">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
                   <h3 className="text-lg font-semibold text-gray-900">Project Information</h3>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between p-3 bg-white/60 rounded-lg border border-gray-100">
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Created</label>
-                    <p className="text-sm text-gray-900">{formatDate(project.createdAt)}</p>
+                      <p className="text-sm font-medium text-gray-900">{formatDate(project.createdAt)}</p>
+                    </div>
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
                   </div>
+                  <div className="flex items-center justify-between p-3 bg-white/60 rounded-lg border border-gray-100">
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Last Updated</label>
-                    <p className="text-sm text-gray-900">{formatDate(project.updatedAt)}</p>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Squads</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-900">{project.counts.repositories}</span>
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
-                        {project.counts.repositories}
-                      </span>
+                      <p className="text-sm font-medium text-gray-900">{formatDate(project.updatedAt)}</p>
                     </div>
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Test Plans</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-900">{project.counts.testPlans}</span>
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
-                        {project.counts.testPlans}
-                      </span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-lg border border-blue-200/50">
+                      <label className="block text-xs font-medium text-blue-600 mb-1">Squads</label>
+                      <span className="text-lg font-bold text-blue-900">{project.counts.repositories}</span>
                     </div>
+                    <div className="p-3 bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-lg border border-amber-200/50">
+                      <label className="block text-xs font-medium text-amber-600 mb-1">Test Plans</label>
+                      <span className="text-lg font-bold text-amber-900">{project.counts.testPlans}</span>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Test Runs</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-900">{project.counts.testRuns}</span>
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
-                        {project.counts.testRuns}
-                      </span>
+                    <div className="p-3 bg-gradient-to-br from-purple-50 to-purple-100/50 rounded-lg border border-purple-200/50">
+                      <label className="block text-xs font-medium text-purple-600 mb-1">Test Runs</label>
+                      <span className="text-lg font-bold text-purple-900">{project.counts.testRuns}</span>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Test Cases</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-900">{project.testCases || 0}</span>
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
-                        {project.testCases || 0}
-                      </span>
+                    <div className="p-3 bg-gradient-to-br from-green-50 to-green-100/50 rounded-lg border border-green-200/50">
+                      <label className="block text-xs font-medium text-green-600 mb-1">Test Cases</label>
+                      <span className="text-lg font-bold text-green-900">{project.testCases || 0}</span>
                     </div>
                   </div>
                 </div>
               </div>
             )}
-
-            {/* Quick Actions */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
-                  <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900">Quick Actions</h3>
-              </div>
-
-              <div className="space-y-2">
-                <Link
-                  href={`/projects/${projectId}/repositories`}
-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                    </svg>
-                    <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">Manage Squads</span>
-                  </div>
-                  <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
-                <Link
-                  href={`/projects/${projectId}/test-plans`}
-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">Manage Test Plans</span>
-                  </div>
-                  <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
-                <Link
-                  href={`/projects/${projectId}/test-runs`}
-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">Manage Test Runs</span>
-                  </div>
-                  <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
-                <Link
-                  href={`/projects/${projectId}/documents`}
-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">Manage Documents</span>
-                  </div>
-                  <svg className="w-5 h-5 text-gray-400 group-hover:text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
-              </div>
-            </div>
           </div>
         </div>
       </main>

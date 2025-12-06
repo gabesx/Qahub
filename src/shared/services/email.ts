@@ -40,7 +40,7 @@ class EmailService {
       });
       
       // Verify connection
-      this.transporter.verify((error, success) => {
+      this.transporter.verify((error) => {
         if (error) {
           logger.error('❌ SMTP connection verification failed:', error);
         } else {

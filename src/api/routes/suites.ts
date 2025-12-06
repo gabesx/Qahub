@@ -128,7 +128,11 @@ router.get('/projects/:projectId/repositories/:repoId/suites', authenticateToken
           _count: {
             select: {
               children: true,
-              testCases: true,
+              testCases: {
+                where: {
+                  deletedAt: null, // Exclude soft-deleted test cases
+                },
+              },
             },
           },
           parent: {
@@ -233,7 +237,11 @@ router.get('/projects/:projectId/repositories/:repoId/suites/:suiteId', authenti
         _count: {
           select: {
             children: true,
-            testCases: true,
+            testCases: {
+              where: {
+                deletedAt: null, // Exclude soft-deleted test cases
+              },
+            },
           },
         },
         parent: {
@@ -386,7 +394,7 @@ router.post('/projects/:projectId/repositories/:repoId/suites', authenticateToke
           action: 'created',
           modelType: 'suite',
           modelId: suite.id,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             title: suite.title,
             parentId: suite.parentId?.toString() || null,
@@ -675,7 +683,11 @@ router.delete('/projects/:projectId/repositories/:repoId/suites/:suiteId', authe
         _count: {
           select: {
             children: true,
-            testCases: true,
+            testCases: {
+              where: {
+                deletedAt: null, // Exclude soft-deleted test cases
+              },
+            },
           },
         },
       },
@@ -721,7 +733,7 @@ router.delete('/projects/:projectId/repositories/:repoId/suites/:suiteId', authe
             parentId: suite.parentId?.toString() || null,
             order: suite.order,
           },
-          newValues: null,
+          newValues: undefined,
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },

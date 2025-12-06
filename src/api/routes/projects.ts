@@ -23,7 +23,12 @@ const updateProjectSchema = z.object({
 const listProjectsSchema = z.object({
   search: z.string().optional(),
   page: z.string().optional().default('1'),
-  limit: z.string().optional().default('10'),
+  limit: z.string().optional().default('10').transform((val) => {
+    const num = parseInt(val, 10);
+    if (isNaN(num) || num < 1) return '10';
+    if (num > 200) return '200';
+    return val;
+  }),
   sortBy: z.enum(['title', 'createdAt', 'updatedAt']).optional().default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
 });
@@ -32,6 +37,14 @@ const listProjectsSchema = z.object({
 const createRepositorySchema = z.object({
   title: z.string().min(1, 'Title is required').max(255, 'Title must be less than 255 characters'),
   prefix: z.string().min(1, 'Prefix is required').max(50, 'Prefix must be less than 50 characters'),
+  description: z.string().max(255, 'Description must be less than 255 characters').optional().nullable(),
+  repositoryStructure: z.enum(['empty', 'template']).optional().default('empty'),
+});
+
+// Update repository schema
+const updateRepositorySchema = z.object({
+  title: z.string().min(1, 'Title is required').max(255, 'Title must be less than 255 characters').optional(),
+  prefix: z.string().min(1, 'Prefix is required').max(50, 'Prefix must be less than 50 characters').optional(),
   description: z.string().max(255, 'Description must be less than 255 characters').optional().nullable(),
 });
 
@@ -78,11 +91,12 @@ router.get('/stats', authenticateToken, async (req, res) => {
           squads: 0,
           testPlans: 0,
           testRuns: 0,
+          testCases: 0,
         },
       });
     }
 
-    const [projectsCount, repositoriesCount, testPlansCount, testRunsCount] = await Promise.all([
+    const [projectsCount, repositoriesCount, testPlansCount, testRunsCount, testCasesCount] = await Promise.all([
       prisma.project.count({
         where: { tenantId },
       }),
@@ -103,6 +117,12 @@ router.get('/stats', authenticateToken, async (req, res) => {
           },
         },
       }),
+      prisma.testCase.count({
+        where: {
+          tenantId,
+          deletedAt: null, // Exclude soft-deleted test cases
+        },
+      }),
     ]);
 
     res.json({
@@ -111,6 +131,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         squads: repositoriesCount, // Using repositories as "Squads"
         testPlans: testPlansCount,
         testRuns: testRunsCount,
+        testCases: testCasesCount,
       },
     });
   } catch (error) {
@@ -397,7 +418,7 @@ router.post('/', authenticateToken, async (req, res) => {
           action: 'created',
           modelType: 'project',
           modelId: project.id,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             title: project.title,
             description: project.description,
@@ -647,7 +668,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             title: project.title,
             description: project.description,
           },
-          newValues: null,
+          newValues: undefined,
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.get('user-agent') || null,
         },
@@ -768,6 +789,7 @@ router.get('/:id/repositories', authenticateToken, async (req, res) => {
             suites: repo._count.suites,
             testCases: testCasesCount,
             automation: automationPercent,
+            automated: automatedCount, // Add actual count of automated test cases
           },
         };
       })
@@ -881,6 +903,7 @@ router.get('/:id/repositories/:repoId', authenticateToken, async (req, res) => {
             suites: suites.length,
             testCases: testCasesCount,
             automation: automationPercent,
+            automated: automatedCount, // Add actual count of automated test cases
           },
         },
       },
@@ -930,6 +953,23 @@ router.post('/:id/repositories', authenticateToken, async (req, res) => {
     }
 
     const data = createRepositorySchema.parse(req.body);
+    const prefixUpper = data.prefix.trim().toUpperCase();
+
+    // Check if prefix already exists (across all projects)
+    const existingRepoWithPrefix = await prisma.repository.findFirst({
+      where: {
+        prefix: prefixUpper,
+      },
+    });
+
+    if (existingRepoWithPrefix) {
+      return res.status(409).json({
+        error: {
+          code: 'PREFIX_ALREADY_EXISTS',
+          message: `A repository with prefix "${prefixUpper}" already exists. Prefixes must be unique across all projects.`,
+        },
+      });
+    }
 
     // Create repository
     const repository = await prisma.repository.create({
@@ -937,7 +977,7 @@ router.post('/:id/repositories', authenticateToken, async (req, res) => {
         tenantId,
         projectId,
         title: data.title.trim(),
-        prefix: data.prefix.trim().toUpperCase(),
+        prefix: prefixUpper,
         description: data.description?.trim() || null,
         createdBy: userId,
         updatedBy: userId,
@@ -960,7 +1000,7 @@ router.post('/:id/repositories', authenticateToken, async (req, res) => {
           action: 'created',
           modelType: 'repository',
           modelId: repository.id,
-          oldValues: null,
+          oldValues: undefined,
           newValues: {
             title: repository.title,
             prefix: repository.prefix,
@@ -975,7 +1015,57 @@ router.post('/:id/repositories', authenticateToken, async (req, res) => {
       logger.warn('Failed to create audit log:', auditError);
     }
 
-    logger.info(`Repository created: ${repository.title} in project ${project.title} by user ${userId}`);
+    logger.info(`Repository created: ${repository.title} (prefix: ${repository.prefix}) in project ${project.title} by user ${userId}`);
+
+    // If template structure is selected, create default test suites
+    if (data.repositoryStructure === 'template') {
+      const templateSuites = [
+        { title: 'Regression iOS', order: 1 },
+        { title: 'Regression Android', order: 2 },
+        { title: 'Regression Web', order: 3 },
+      ];
+
+      try {
+        for (const suiteData of templateSuites) {
+          const suite = await prisma.suite.create({
+            data: {
+              repositoryId: repository.id,
+              title: suiteData.title,
+              parentId: null,
+              order: suiteData.order,
+              createdBy: userId,
+              updatedBy: userId,
+            },
+          });
+
+          // Create audit log for each suite
+          try {
+            await prisma.auditLog.create({
+              data: {
+                userId,
+                action: 'created',
+                modelType: 'suite',
+                modelId: suite.id,
+                oldValues: undefined,
+                newValues: {
+                  title: suite.title,
+                  repositoryId: repository.id.toString(),
+                  order: suite.order,
+                },
+                ipAddress: req.ip || req.socket.remoteAddress || null,
+                userAgent: req.get('user-agent') || null,
+              },
+            });
+          } catch (auditError) {
+            logger.warn(`Failed to create audit log for template suite ${suiteData.title}:`, auditError);
+          }
+        }
+        logger.info(`Template suites created for repository ${repository.id} by user ${userId}`);
+      } catch (suiteError) {
+        logger.error(`Failed to create template suites for repository ${repository.id}:`, suiteError);
+        // Continue even if suite creation fails - repository is already created
+      }
+    }
 
     res.status(201).json({
       data: {
@@ -990,7 +1080,7 @@ router.post('/:id/repositories', authenticateToken, async (req, res) => {
         },
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         error: {
@@ -1000,11 +1090,354 @@ router.post('/:id/repositories', authenticateToken, async (req, res) => {
         },
       });
     }
+    
+    // Handle Prisma unique constraint violation (fallback)
+    if (error.code === 'P2002' && error.meta?.target?.includes('prefix')) {
+      return res.status(409).json({
+        error: {
+          code: 'PREFIX_ALREADY_EXISTS',
+          message: `A repository with this prefix already exists. Prefixes must be unique across all projects.`,
+        },
+      });
+    }
+    
     logger.error('Create repository error:', error);
     res.status(500).json({
       error: {
         code: 'INTERNAL_SERVER_ERROR',
         message: 'An error occurred while creating repository',
+      },
+    });
+  }
+});
+
+// Update repository
+router.patch('/:id/repositories/:repoId', authenticateToken, async (req, res) => {
+  try {
+    const userId = BigInt((req as AuthRequest).user!.userId);
+    const tenantId = await getUserPrimaryTenant(userId);
+    const projectId = BigInt(req.params.id);
+    const repoId = BigInt(req.params.repoId);
+
+    if (!tenantId) {
+      return res.status(403).json({
+        error: {
+          code: 'NO_TENANT',
+          message: 'You must belong to a tenant to update repositories',
+        },
+      });
+    }
+
+    // Check if project exists and belongs to user's tenant
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        tenantId: tenantId || undefined,
+      },
+    });
+
+    if (!project) {
+      return res.status(404).json({
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Project not found',
+        },
+      });
+    }
+
+    // Check if repository exists and belongs to the project and tenant
+    const existingRepository = await prisma.repository.findFirst({
+      where: {
+        id: repoId,
+        projectId,
+        tenantId,
+      },
+    });
+
+    if (!existingRepository) {
+      return res.status(404).json({
+        error: {
+          code: 'REPOSITORY_NOT_FOUND',
+          message: 'Repository not found',
+        },
+      });
+    }
+
+    const data = updateRepositorySchema.parse(req.body);
+
+    // Check if prefix is being updated and if it already exists (excluding current repository)
+    if (data.prefix !== undefined) {
+      const prefixUpper = data.prefix.trim().toUpperCase();
+      
+      // Check if prefix already exists in another repository
+      const existingRepoWithPrefix = await prisma.repository.findFirst({
+        where: {
+          prefix: prefixUpper,
+          id: {
+            not: repoId, // Exclude current repository
+          },
+        },
+      });
+
+      if (existingRepoWithPrefix) {
+        return res.status(409).json({
+          error: {
+            code: 'PREFIX_ALREADY_EXISTS',
+            message: `A repository with prefix "${prefixUpper}" already exists. Prefixes must be unique across all projects.`,
+          },
+        });
+      }
+    }
+
+    // Build update data
+    const updateData: any = {
+      updatedBy: userId,
+    };
+    if (data.title !== undefined) {
+      updateData.title = data.title.trim();
+    }
+    if (data.prefix !== undefined) {
+      updateData.prefix = data.prefix.trim().toUpperCase();
+    }
+    if (data.description !== undefined) {
+      updateData.description = data.description?.trim() || null;
+    }
+
+    const repository = await prisma.repository.update({
+      where: { id: repoId },
+      data: updateData,
+      include: {
+        project: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+    });
+
+    // Fetch creator and updater separately since Repository model doesn't have relations
+    const creator = repository.createdBy
+      ? await prisma.user.findUnique({
+          where: { id: repository.createdBy },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+          },
+        })
+      : null;
+
+    const updater = repository.updatedBy
+      ? await prisma.user.findUnique({
+          where: { id: repository.updatedBy },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+          },
+        })
+      : null;
+
+    // Create audit log
+    try {
+      const oldValues: any = {};
+      const newValues: any = {};
+
+      if (data.title !== undefined && existingRepository.title !== repository.title) {
+        oldValues.title = existingRepository.title;
+        newValues.title = repository.title;
+      }
+      if (data.prefix !== undefined && existingRepository.prefix !== repository.prefix) {
+        oldValues.prefix = existingRepository.prefix;
+        newValues.prefix = repository.prefix;
+      }
+      if (data.description !== undefined && existingRepository.description !== repository.description) {
+        oldValues.description = existingRepository.description;
+        newValues.description = repository.description;
+      }
+
+      if (Object.keys(newValues).length > 0) {
+        await prisma.auditLog.create({
+          data: {
+            userId,
+            action: 'updated',
+            modelType: 'repository',
+            modelId: repoId,
+            oldValues,
+            newValues,
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.get('user-agent') || null,
+          },
+        });
+      }
+    } catch (auditError) {
+      logger.warn('Failed to create audit log for repository update:', auditError);
+    }
+
+    logger.info(`Repository updated: ${repository.title} in project ${project.title} by user ${userId}`);
+
+    res.json({
+      message: 'Repository updated successfully',
+      data: {
+        repository: {
+          id: repository.id.toString(),
+          title: repository.title,
+          prefix: repository.prefix,
+          description: repository.description,
+          projectId: repository.projectId.toString(),
+          createdAt: repository.createdAt.toISOString(),
+          updatedAt: repository.updatedAt.toISOString(),
+          createdBy: creator
+            ? {
+                id: creator.id.toString(),
+                name: creator.name,
+                email: creator.email,
+                avatar: creator.avatar,
+              }
+            : null,
+          updatedBy: updater
+            ? {
+                id: updater.id.toString(),
+                name: updater.name,
+                email: updater.email,
+                avatar: updater.avatar,
+              }
+            : null,
+        },
+      },
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid input data',
+          details: error.errors,
+        },
+      });
+    }
+    
+    // Handle Prisma unique constraint violation (fallback)
+    if (error.code === 'P2002' && error.meta?.target?.includes('prefix')) {
+      return res.status(409).json({
+        error: {
+          code: 'PREFIX_ALREADY_EXISTS',
+          message: `A repository with this prefix already exists. Prefixes must be unique across all projects.`,
+        },
+      });
+    }
+    
+    logger.error('Update repository error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while updating repository',
+      },
+    });
+  }
+});
+
+// Delete repository
+router.delete('/:id/repositories/:repoId', authenticateToken, async (req, res) => {
+  try {
+    const userId = BigInt((req as AuthRequest).user!.userId);
+    const tenantId = await getUserPrimaryTenant(userId);
+    const projectId = BigInt(req.params.id);
+    const repoId = BigInt(req.params.repoId);
+
+    if (!tenantId) {
+      return res.status(403).json({
+        error: {
+          code: 'NO_TENANT',
+          message: 'You must belong to a tenant to delete repositories',
+        },
+      });
+    }
+
+    // Check if project exists and belongs to user's tenant
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        tenantId: tenantId || undefined,
+      },
+    });
+
+    if (!project) {
+      return res.status(404).json({
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Project not found',
+        },
+      });
+    }
+
+    // Get repository
+    const repository = await prisma.repository.findFirst({
+      where: {
+        id: repoId,
+        projectId,
+        tenantId,
+      },
+      include: {
+        _count: {
+          select: {
+            suites: true,
+            testPlans: true,
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      return res.status(404).json({
+        error: {
+          code: 'REPOSITORY_NOT_FOUND',
+          message: 'Repository not found',
+        },
+      });
+    }
+
+    // Delete repository (cascade will handle related records)
+    await prisma.repository.delete({
+      where: { id: repoId },
+    });
+
+    // Create audit log
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'deleted',
+          modelType: 'repository',
+          modelId: repoId,
+          oldValues: {
+            title: repository.title,
+            prefix: repository.prefix,
+            description: repository.description,
+          },
+          newValues: undefined,
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError);
+    }
+
+    logger.info(`Repository deleted: ${repository.title} from project ${project.title} by user ${userId}`);
+
+    res.json({
+      message: 'Repository deleted successfully',
+    });
+  } catch (error) {
+    logger.error('Delete repository error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while deleting repository',
       },
     });
   }

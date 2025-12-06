@@ -177,17 +177,63 @@ router.get('/projects/:projectId/test-runs', authenticateToken, async (req, res)
     // Calculate result statistics
     const testRunsWithStats = await Promise.all(
       testRuns.map(async (tr) => {
+        // Get the test plan's total test case count
+        const testPlan = await prisma.testPlan.findUnique({
+          where: { id: tr.testPlanId },
+          include: {
+            _count: {
+              select: {
+                testPlanCases: true,
+              },
+            },
+          },
+        });
+
+        const total = testPlan?._count.testPlanCases || 0;
+
         const results = await prisma.testRunResult.findMany({
           where: { testRunId: tr.id },
-          select: { status: true },
+          select: { 
+            status: true,
+            executionTime: true,
+            executedAt: true,
+          },
+        });
+
+        // Calculate stats including inProgress and toDo
+        const passed = results.filter((r) => r.status === 'passed').length;
+        const failed = results.filter((r) => r.status === 'failed').length;
+        const skipped = results.filter((r) => r.status === 'skipped').length;
+        const blocked = results.filter((r) => r.status === 'blocked').length;
+        const inProgress = results.filter((r) => r.status === 'inProgress').length;
+        const executed = passed + failed + skipped + blocked + inProgress;
+        const toDo = Math.max(0, total - executed);
+
+        // Calculate total execution time from all results
+        let totalExecutionTime = 0;
+        const now = new Date();
+        results.forEach((result) => {
+          if (result.executionTime && result.executionTime > 0) {
+            totalExecutionTime += result.executionTime;
+          } else if (result.executedAt && result.status === 'inProgress') {
+            // For in-progress tests, calculate elapsed time
+            const startTime = new Date(result.executedAt).getTime();
+            const elapsed = Math.floor((now.getTime() - startTime) / 1000);
+            if (elapsed > 0) {
+              totalExecutionTime += elapsed;
+            }
+          }
         });
 
         const stats = {
-          total: results.length,
-          passed: results.filter((r) => r.status === 'passed').length,
-          failed: results.filter((r) => r.status === 'failed').length,
-          skipped: results.filter((r) => r.status === 'skipped').length,
-          blocked: results.filter((r) => r.status === 'blocked').length,
+          total,
+          passed,
+          failed,
+          skipped,
+          blocked,
+          inProgress,
+          toDo,
+          executed,
         };
 
         return {
@@ -215,6 +261,7 @@ router.get('/projects/:projectId/test-runs', authenticateToken, async (req, res)
             comments: tr._count.comments,
           },
           stats,
+          totalExecutionTime,
         };
       })
     );
@@ -481,6 +528,16 @@ router.post('/projects/:projectId/test-runs', authenticateToken, async (req, res
             id: true,
           },
         },
+        testPlanCases: {
+          include: {
+            testCase: {
+              select: {
+                id: true,
+                deletedAt: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -489,6 +546,25 @@ router.post('/projects/:projectId/test-runs', authenticateToken, async (req, res
         error: {
           code: 'TEST_PLAN_NOT_FOUND',
           message: 'Test plan not found',
+        },
+      });
+    }
+
+    // Validate that all test cases in the test plan still exist and aren't deleted
+    const invalidTestCases = testPlan.testPlanCases.filter(
+      (tpc) => tpc.testCase.deletedAt !== null
+    );
+
+    if (invalidTestCases.length > 0) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_TEST_CASES',
+          message: `Test plan contains ${invalidTestCases.length} deleted or invalid test case(s)`,
+          details: {
+            invalidCount: invalidTestCases.length,
+            totalCount: testPlan.testPlanCases.length,
+            invalidTestCaseIds: invalidTestCases.map((tpc) => tpc.testCase.id.toString()),
+          },
         },
       });
     }

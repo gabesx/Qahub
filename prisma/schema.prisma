@@ -38,8 +38,8 @@ model Tenant {
   subdomain      String?      @unique @map("subdomain") @db.VarChar(255)
   plan           TenantPlan   @default(free)
   status         TenantStatus @default(active)
-  maxUsers       Int          @default(5) @map("max_users") @db.Integer
-  maxProjects    Int          @default(3) @map("max_projects") @db.Integer
+  maxUsers       Int          @default(100) @map("max_users") @db.Integer
+  maxProjects    Int          @default(50) @map("max_projects") @db.Integer
   features       Json?        @map("features")
   billingEmail   String?      @map("billing_email") @db.VarChar(255)
   subscriptionId String?      @map("subscription_id") @db.VarChar(255)
@@ -296,13 +296,15 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
 
-  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  creator      User?        @relation("ProjectCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  updater      User?        @relation("ProjectUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
-  repositories Repository[]
-  testPlans    TestPlan[]
-  testRuns     TestRun[]
-  documents    Document[]
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator          User?              @relation("ProjectCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater          User?              @relation("ProjectUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+  repositories     Repository[]
+  testPlans        TestPlan[]
+  testRuns         TestRun[]
+  documents        Document[]
+  testRunTemplates TestRunTemplate[]
+  scheduledRuns    ScheduledTestRun[]
 
   @@index([tenantId, id])
   @@index([tenantId, createdAt])
@@ -324,12 +326,14 @@ model Repository {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  suites    Suite[]
-  testPlans TestPlan[]
-  testRuns  TestRun[]
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project         Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  suites          Suite[]
+  testPlans       TestPlan[]
+  testRuns        TestRun[]
+  TestRunTemplate TestRunTemplate[]
 
+  @@unique([prefix])
   @@index([tenantId, id])
   @@index([tenantId, projectId])
   @@index([projectId])
@@ -456,6 +460,7 @@ model TestPlan {
   testPlanCases TestPlanTestCase[]
   testRuns      TestRun[]
   comments      TestRunComment[]
+  templates     TestRunTemplate[]
 
   @@index([projectId, repositoryId])
   @@index([projectId, repositoryId, status])
@@ -520,6 +525,7 @@ enum TestRunResultStatus {
   failed
   skipped
   blocked
+  inProgress
 }
 
 model TestRun {
@@ -546,6 +552,7 @@ model TestRun {
   results     TestRunResult[]
   attachments TestRunAttachment[]
   comments    TestRunComment[]
+  scheduledBy ScheduledTestRun?   @relation("ScheduledTestRunLastRun")
 
   @@index([projectId, createdAt])
   @@index([testPlanId, createdAt])
@@ -571,10 +578,12 @@ model TestRunResult {
   logs               String?              @db.Text
   defectFoundAtStage TestCaseDefectStage? @map("defect_found_at_stage")
   bugBudgetId        BigInt?              @map("bug_budget_id") @db.BigInt
+  bugTicketUrl       String?              @map("bug_ticket_url") @db.VarChar(500)
   defectSeverity     String?              @map("defect_severity") @db.VarChar(50)
   executedBy         BigInt?              @map("executed_by") @db.BigInt
   executedAt         DateTime?            @map("executed_at") @db.Timestamp
   retryCount         Int                  @default(0) @map("retry_count") @db.Integer
+  isValid            Boolean              @default(true) @map("is_valid") @db.Boolean
   createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamp
 
   testRun  TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
@@ -589,6 +598,7 @@ model TestRunResult {
   @@index([defectFoundAtStage, executedAt])
   @@index([bugBudgetId])
   @@index([status, defectFoundAtStage])
+  @@index([isValid])
   @@map("test_run_results")
 }
 
@@ -597,15 +607,18 @@ model TestRunAttachment {
   url        String   @db.VarChar(500)
   testRunId  BigInt   @map("test_run_id") @db.BigInt
   testCaseId BigInt   @map("test_case_id") @db.BigInt
+  commentId  BigInt?  @map("comment_id") @db.BigInt
   uploadedBy BigInt?  @map("uploaded_by") @db.BigInt
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
 
-  testRun  TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
-  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  testRun  TestRun         @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  testCase TestCase        @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  comment  TestRunComment? @relation(fields: [commentId], references: [id], onDelete: SetNull)
 
   @@index([testRunId])
   @@index([testCaseId])
   @@index([testRunId, testCaseId])
+  @@index([commentId])
   @@index([uploadedBy])
   @@map("test_runs_attachments")
 }
@@ -619,13 +632,87 @@ model TestRunComment {
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp
   updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamp
 
-  testRun  TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
-  testPlan TestPlan @relation(fields: [testPlanId], references: [id], onDelete: Cascade)
+  testRun     TestRun             @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  testPlan    TestPlan            @relation(fields: [testPlanId], references: [id], onDelete: Cascade)
+  attachments TestRunAttachment[]
 
   @@index([testRunId, createdAt])
   @@index([testPlanId, createdAt])
   @@index([userId, createdAt])
   @@map("test_runs_comments")
+}
+
+model TestRunTemplate {
+  id           BigInt   @id @default(autoincrement()) @db.BigInt
+  projectId    BigInt   @map("project_id") @db.BigInt
+  repositoryId BigInt?  @map("repository_id") @db.BigInt
+  testPlanId   BigInt   @map("test_plan_id") @db.BigInt
+  name         String   @db.VarChar(255)
+  description  String?  @db.Text
+  environment  String?  @db.VarChar(100)
+  buildVersion String?  @map("build_version") @db.VarChar(100)
+  titlePattern String?  @map("title_pattern") @db.VarChar(255)
+  isActive     Boolean  @default(true) @map("is_active") @db.Boolean
+  createdBy    BigInt?  @map("created_by") @db.BigInt
+  updatedBy    BigInt?  @map("updated_by") @db.BigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  project    Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository Repository?        @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  testPlan   TestPlan           @relation(fields: [testPlanId], references: [id], onDelete: Cascade)
+  schedules  ScheduledTestRun[]
+
+  @@index([projectId, isActive])
+  @@index([testPlanId])
+  @@index([createdBy])
+  @@map("test_run_templates")
+}
+
+enum ScheduledTestRunFrequency {
+  daily
+  weekly
+  monthly
+  custom
+}
+
+enum ScheduledTestRunStatus {
+  active
+  paused
+  completed
+  cancelled
+}
+
+model ScheduledTestRun {
+  id          BigInt                    @id @default(autoincrement()) @db.BigInt
+  templateId  BigInt                    @map("template_id") @db.BigInt
+  projectId   BigInt                    @map("project_id") @db.BigInt
+  name        String                    @db.VarChar(255)
+  description String?                   @db.Text
+  frequency   ScheduledTestRunFrequency
+  status      ScheduledTestRunStatus    @default(active)
+  schedule    String                    @db.Text // JSON: cron expression or schedule config
+  nextRunAt   DateTime?                 @map("next_run_at") @db.Timestamp
+  lastRunAt   DateTime?                 @map("last_run_at") @db.Timestamp
+  lastRunId   BigInt?                   @map("last_run_id") @db.BigInt
+  runCount    Int                       @default(0) @map("run_count") @db.Integer
+  maxRuns     Int?                      @map("max_runs") @db.Integer
+  endDate     DateTime?                 @map("end_date") @db.Date
+  createdBy   BigInt?                   @map("created_by") @db.BigInt
+  updatedBy   BigInt?                   @map("updated_by") @db.BigInt
+  createdAt   DateTime                  @default(now()) @map("created_at") @db.Timestamp
+  updatedAt   DateTime                  @updatedAt @map("updated_at") @db.Timestamp
+
+  template TestRunTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lastRun  TestRun?        @relation("ScheduledTestRunLastRun", fields: [lastRunId], references: [id], onDelete: SetNull)
+
+  @@unique([lastRunId])
+  @@index([projectId, status])
+  @@index([templateId])
+  @@index([nextRunAt])
+  @@index([status, nextRunAt])
+  @@map("scheduled_test_runs")
 }
 
 // ========================================
@@ -787,6 +874,8 @@ model EditorImage {
   path         String   @db.VarChar(500)
   mimeType     String   @map("mime_type") @db.VarChar(100)
   size         Int      @db.Integer
+  data         Bytes?   @db.ByteA // Binary data stored in database (optional, for STORAGE_TYPE=db)
+  storageType  String   @default("filesystem") @map("storage_type") @db.VarChar(50) // 'filesystem', 'database', 's3'
   uploadedBy   BigInt?  @map("uploaded_by") @db.BigInt
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp
@@ -796,6 +885,7 @@ model EditorImage {
   @@index([uploadedBy, createdAt])
   @@index([mimeType])
   @@index([filename])
+  @@index([storageType])
   @@map("editor_images")
 }
 
