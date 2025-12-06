@@ -276,7 +276,7 @@ router.get('/projects/:projectId/repositories/:repoId/test-plans/:testPlanId', a
           },
         },
         testPlanCases: {
-          take: 50,
+          take: 1000, // Increased limit to fetch all test cases
           include: {
             testCase: {
               select: {
@@ -285,6 +285,14 @@ router.get('/projects/:projectId/repositories/:repoId/test-plans/:testPlanId', a
                 automated: true,
                 priority: true,
                 severity: true,
+                jiraKey: true,
+                suiteId: true,
+                suite: {
+                  select: {
+                    id: true,
+                    title: true,
+                  },
+                },
               },
             },
           },
@@ -346,6 +354,12 @@ router.get('/projects/:projectId/repositories/:repoId/test-plans/:testPlanId', a
             priority: tpc.testCase.priority,
             severity: tpc.testCase.severity,
             order: tpc.order,
+            jiraKey: tpc.testCase.jiraKey,
+            suiteId: tpc.testCase.suiteId?.toString(),
+            suite: tpc.testCase.suite ? {
+              id: tpc.testCase.suite.id.toString(),
+              title: tpc.testCase.suite.title,
+            } : null,
           })),
           createdBy: createdByUser ? {
             id: createdByUser.id.toString(),

@@ -1,140 +1,738 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import React, { useState, useEffect, useRef } from 'react'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AppHeader from '../../components/AppHeader'
 import { api } from '../../../lib/api'
 
-interface Project {
-  id: string
-  title: string
-  description: string | null
-  createdBy: string | null
-  updatedBy: string | null
-  creator: {
-    id: string
-    name: string
-    email: string
-    avatar: string | null
-  } | null
-  updater: {
-    id: string
-    name: string
-    email: string
-    avatar: string | null
-  } | null
-  createdAt: string
-  updatedAt: string
-  counts: {
-    repositories: number
-    testPlans: number
-    testRuns: number
-    documents: number
-  }
-}
+// Import types
+import { Project, Repository, TabType, PaginationState } from './types'
 
-interface Repository {
-  id: string
-  title: string
-  description: string | null
-  prefix: string
-  createdAt: string
-  updatedAt: string
-  counts?: {
-    suites?: number
-    testCases?: number
-    automation?: number
-  }
-}
+// Import hooks
+import {
+  useProject,
+  useRepositories,
+  useTestPlans,
+  useTestSuites,
+  useTestCases,
+  useAutomatedTestCases,
+  useTestRuns,
+  useTestSuitesForImport,
+  useTestCaseDetail,
+} from './hooks'
 
-type TabType = 'squads' | 'testSuites' | 'testCases' | 'automation' | 'testPlans' | 'testRuns'
+// Import components
+import {
+  SquadsTab,
+  TestPlansTab,
+  TestSuitesTab,
+  TestCasesTab,
+  AutomationTab,
+  TestRunsTab,
+  ComingSoonPlaceholder,
+  DeleteProjectModal,
+  DeleteRepositoryModal,
+  DeleteTestPlanModal,
+  DeleteTestRunModal,
+  ImportTestCasesModal,
+  TestCaseDetailModal,
+} from './components'
+
+// Import utilities
+import { parseCSV } from './utils/parseCSV'
+import { formatTimeAgo } from './utils/formatTimeAgo'
 
 export default function ViewProjectPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const projectId = params.id as string
 
-  const [project, setProject] = useState<Project | null>(null)
-  const [repositories, setRepositories] = useState<Repository[]>([])
-  const [activeTab, setActiveTab] = useState<TabType>('squads')
-  const [isLoading, setIsLoading] = useState(true)
-  const [isLoadingRepos, setIsLoadingRepos] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Use hooks for data fetching
+  const { project, isLoading: isLoadingProject, error: projectError, refetch: refetchProject } = useProject(projectId)
+  const { repositories, isLoading: isLoadingRepos, refetch: refetchRepositories } = useRepositories(projectId)
+  const { testPlans, isLoading: isLoadingTestPlans, refetch: refetchTestPlans } = useTestPlans(projectId, repositories)
+  const { testSuites: allTestSuites, isLoading: isLoadingAllTestSuites, refetch: refetchAllTestSuites } = useTestSuites(projectId, repositories)
+  const { testCases: allTestCases, isLoading: isLoadingAllTestCases, refetch: refetchAllTestCases } = useTestCases(projectId, repositories)
+  const { testCases: automatedTestCases, isLoading: isLoadingAutomatedTestCases, refetch: refetchAutomatedTestCases } = useAutomatedTestCases(projectId, repositories)
+  const { testRuns, isLoading: isLoadingTestRuns, refetch: refetchTestRuns } = useTestRuns(projectId)
+  const { testSuites: testSuitesForImport, isLoading: isLoadingSuites, fetchTestSuites: fetchTestSuitesForImport } = useTestSuitesForImport(projectId)
+  const { testCase: modalTestCaseData, isLoading: isLoadingModalTestCase, error: testCaseError, fetchTestCaseDetail, clearTestCase } = useTestCaseDetail(projectId)
+
+  // UI State - Initialize from URL parameter if present
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const tabParam = searchParams?.get('tab')
+    if (tabParam && ['squads', 'testPlans', 'testSuites', 'testCases', 'automation', 'testRuns'].includes(tabParam)) {
+      return tabParam as TabType
+    }
+    return 'squads'
+  })
   const [searchQuery, setSearchQuery] = useState('')
+  const [hoveredStat, setHoveredStat] = useState<{ repoId: string; stat: string } | null>(null)
+  const [openRepoMenu, setOpenRepoMenu] = useState<string | null>(null)
+  const [openTestPlanMenu, setOpenTestPlanMenu] = useState<string | null>(null)
+  const [openTestRunMenu, setOpenTestRunMenu] = useState<string | null>(null)
+
+  // Modal States
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteRepoModal, setShowDeleteRepoModal] = useState(false)
+  const [repoToDelete, setRepoToDelete] = useState<Repository | null>(null)
+  const [isDeletingRepo, setIsDeletingRepo] = useState(false)
+  const [showDeleteTestPlanModal, setShowDeleteTestPlanModal] = useState(false)
+  const [testPlanToDelete, setTestPlanToDelete] = useState<any | null>(null)
+  const [isDeletingTestPlan, setIsDeletingTestPlan] = useState(false)
+  const [showDeleteTestRunModal, setShowDeleteTestRunModal] = useState(false)
+  const [testRunToDelete, setTestRunToDelete] = useState<any | null>(null)
+  const [isDeletingTestRun, setIsDeletingTestRun] = useState(false)
+  const [showImportTestCasesModal, setShowImportTestCasesModal] = useState(false)
+  const [selectedRepoForImport, setSelectedRepoForImport] = useState<Repository | null>(null)
+  const [isTestCaseModalOpen, setIsTestCaseModalOpen] = useState(false)
+  const [modalTestCaseRepository, setModalTestCaseRepository] = useState<Repository | null>(null)
+  const [modalTestCaseId, setModalTestCaseId] = useState<string | null>(null)
+  const [modalTestCaseRepoId, setModalTestCaseRepoId] = useState<string | null>(null)
+  const [modalTestCaseSuiteId, setModalTestCaseSuiteId] = useState<string | null>(null)
+
+  // Upload State
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [parsedTestCases, setParsedTestCases] = useState<any[]>([])
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 })
+  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number; created: number; updated: number; errors: string[] }>({ success: 0, failed: 0, created: 0, updated: 0, errors: [] })
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Pagination States
+  const [testCasesPagination, setTestCasesPagination] = useState<PaginationState>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+  })
+  const [testPlansPagination, setTestPlansPagination] = useState<PaginationState>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+  })
+  const [allTestSuitesPagination, setAllTestSuitesPagination] = useState<PaginationState>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+  })
+  const [automatedTestCasesPagination, setAutomatedTestCasesPagination] = useState<PaginationState>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+  })
+  const [testRunsPagination, setTestRunsPagination] = useState<PaginationState>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+  })
+
+  // Download state
+  const [isDownloadingTestPlan, setIsDownloadingTestPlan] = useState<string | null>(null)
+
+  // Error state
+  const [error, setError] = useState<string | null>(null)
+
+  // Update pagination totals when data changes
+  useEffect(() => {
+    setTestCasesPagination(prev => ({
+      ...prev,
+      total: allTestCases.length,
+      totalPages: prev.limit === -1 ? 1 : Math.ceil(allTestCases.length / prev.limit),
+    }))
+  }, [allTestCases.length])
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) {
-      router.push('/')
-      return
-    }
-    fetchProject()
-    fetchRepositories()
-  }, [projectId, router])
+    setTestPlansPagination(prev => ({
+      ...prev,
+      total: testPlans.length,
+      totalPages: prev.limit === -1 ? 1 : Math.ceil(testPlans.length / prev.limit),
+    }))
+  }, [testPlans.length])
 
-  const fetchProject = async () => {
-    setIsLoading(true)
+  useEffect(() => {
+    setAllTestSuitesPagination(prev => ({
+      ...prev,
+      total: allTestSuites.length,
+      totalPages: prev.limit === -1 ? 1 : Math.ceil(allTestSuites.length / prev.limit),
+    }))
+  }, [allTestSuites.length])
+
+  useEffect(() => {
+    setAutomatedTestCasesPagination(prev => ({
+      ...prev,
+      total: automatedTestCases.length,
+      totalPages: prev.limit === -1 ? 1 : Math.ceil(automatedTestCases.length / prev.limit),
+    }))
+  }, [automatedTestCases.length])
+
+  useEffect(() => {
+    setTestRunsPagination(prev => ({
+      ...prev,
+      total: testRuns.length,
+      totalPages: prev.limit === -1 ? 1 : Math.ceil(testRuns.length / prev.limit),
+    }))
+  }, [testRuns.length])
+
+  // Fetch data when tabs change
+  useEffect(() => {
+    if (activeTab === 'testPlans' && repositories.length > 0) {
+      refetchTestPlans()
+    }
+  }, [activeTab, repositories.length, refetchTestPlans])
+
+  useEffect(() => {
+    if (activeTab === 'testSuites' && repositories.length > 0) {
+      refetchAllTestSuites()
+    }
+  }, [activeTab, repositories.length, refetchAllTestSuites])
+
+  useEffect(() => {
+    if (activeTab === 'testCases' && repositories.length > 0) {
+      refetchAllTestCases()
+    }
+  }, [activeTab, repositories.length, refetchAllTestCases])
+
+  useEffect(() => {
+    if (activeTab === 'automation' && repositories.length > 0) {
+      refetchAutomatedTestCases()
+    }
+  }, [activeTab, repositories.length, refetchAutomatedTestCases])
+
+  useEffect(() => {
+    if (activeTab === 'testRuns') {
+      refetchTestRuns()
+    }
+  }, [activeTab, refetchTestRuns])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('[data-repo-menu]')) {
+        setOpenRepoMenu(null)
+      }
+      if (!target.closest('[data-test-plan-menu]')) {
+        setOpenTestPlanMenu(null)
+      }
+      if (!target.closest('[data-test-run-menu]')) {
+        setOpenTestRunMenu(null)
+      }
+    }
+
+    if (openRepoMenu || openTestPlanMenu || openTestRunMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [openRepoMenu, openTestPlanMenu, openTestRunMenu])
+
+  // Handlers
+  const handleDeleteProject = async () => {
+    setIsDeleting(true)
     setError(null)
 
     try {
-      const response = await api.get(`/projects/${projectId}`)
-      
-      if (response.data?.data?.project) {
-        setProject(response.data.data.project)
-      }
+      await api.delete(`/projects/${projectId}`)
+      router.push('/projects')
     } catch (err: any) {
-      console.error('Fetch project error:', err)
+      console.error('Delete project error:', err)
       if (err.response?.status === 401) {
         localStorage.removeItem('token')
         router.push('/')
-      } else if (err.response?.status === 404) {
-        setError('Project not found')
       } else {
-        setError(err.response?.data?.error?.message || 'Failed to fetch project')
+        setError(err.response?.data?.error?.message || 'Failed to delete project')
       }
     } finally {
-      setIsLoading(false)
+      setIsDeleting(false)
+      setShowDeleteModal(false)
     }
   }
 
-  const fetchRepositories = async () => {
-    setIsLoadingRepos(true)
+  const handleDeleteRepository = async () => {
+    if (!repoToDelete) return
+
+    setIsDeletingRepo(true)
+    setError(null)
+
     try {
-      const response = await api.get(`/projects/${projectId}/repositories`)
+      await api.delete(`/projects/${projectId}/repositories/${repoToDelete.id}`)
+      setShowDeleteRepoModal(false)
+      setRepoToDelete(null)
+      await refetchRepositories()
+    } catch (err: any) {
+      console.error('Delete repository error:', err)
+      if (err.response?.status === 401) {
+        localStorage.removeItem('token')
+        router.push('/')
+      } else {
+        setError(err.response?.data?.error?.message || 'Failed to delete repository')
+      }
+    } finally {
+      setIsDeletingRepo(false)
+    }
+  }
+
+  const handleDeleteTestPlan = async () => {
+    if (!testPlanToDelete) return
+
+    setIsDeletingTestPlan(true)
+    setError(null)
+
+    try {
+      await api.delete(
+        `/projects/${projectId}/repositories/${testPlanToDelete.repository.id}/test-plans/${testPlanToDelete.id}`
+      )
       
-      if (response.data?.data?.repositories) {
-        setRepositories(response.data.data.repositories)
+      await refetchTestPlans()
+      setShowDeleteTestPlanModal(false)
+      setTestPlanToDelete(null)
+    } catch (err: any) {
+      console.error('Delete test plan error:', err)
+      if (err.response?.status === 409) {
+        setError(err.response?.data?.error?.message || 'Cannot delete test plan that has test runs')
+      } else {
+        setError(err.response?.data?.error?.message || 'Failed to delete test plan. Please try again.')
+      }
+    } finally {
+      setIsDeletingTestPlan(false)
+    }
+  }
+
+  const handleDeleteTestRun = async () => {
+    if (!testRunToDelete) return
+
+    setIsDeletingTestRun(true)
+    setError(null)
+
+    try {
+      await api.delete(`/projects/${projectId}/test-runs/${testRunToDelete.id}`)
+      
+      await refetchTestRuns()
+      setShowDeleteTestRunModal(false)
+      setTestRunToDelete(null)
+    } catch (err: any) {
+      console.error('Delete test run error:', err)
+      if (err.response?.status === 401) {
+        localStorage.removeItem('token')
+        router.push('/')
+      } else {
+        setError(err.response?.data?.error?.message || 'Failed to delete test run. Please try again.')
+      }
+    } finally {
+      setIsDeletingTestRun(false)
+    }
+  }
+
+  const handleDownloadTestPlan = async (testPlan: any) => {
+    setIsDownloadingTestPlan(testPlan.id)
+    try {
+      // Fetch test plan details with test cases
+      const response = await api.get(
+        `/projects/${projectId}/repositories/${testPlan.repository.id}/test-plans/${testPlan.id}`
+      )
+      
+      const testPlanData = response.data?.data?.testPlan
+      if (!testPlanData || !testPlanData.testCases || testPlanData.testCases.length === 0) {
+        alert('No test cases found in this test plan')
+        return
+      }
+
+      // Get repository prefix
+      const repo = repositories.find(r => r.id === testPlan.repository.id)
+      const prefix = repo?.prefix || 'ST'
+
+      // Get all suites for the repository (once)
+      const suitesResponse = await api.get(
+        `/projects/${projectId}/repositories/${testPlan.repository.id}/suites`,
+        { params: { page: 1, limit: 1000 } }
+      )
+      const suites = suitesResponse.data?.data?.suites || []
+
+      // Fetch full details for each test case
+      const testCasesWithDetails: any[] = []
+      const testCaseIds = testPlanData.testCases.map((tc: any) => tc.id)
+      
+      // Fetch all test cases from all suites in parallel
+      const allTestCasesMap = new Map<string, any>()
+      for (const suite of suites) {
+        try {
+          const testCasesResponse = await api.get(
+            `/projects/${projectId}/repositories/${testPlan.repository.id}/suites/${suite.id}/test-cases`,
+            { params: { page: 1, limit: 1000, includeDeleted: false } }
+          )
+          const testCases = testCasesResponse.data?.data?.testCases || []
+          testCases.forEach((tc: any) => {
+            if (testCaseIds.includes(tc.id)) {
+              allTestCasesMap.set(tc.id, tc)
+            }
+          })
+        } catch (err) {
+          console.error(`Error fetching test cases from suite ${suite.id}:`, err)
+        }
+      }
+
+      // Match test cases from test plan with full details
+      for (const tc of testPlanData.testCases) {
+        const fullDetails = allTestCasesMap.get(tc.id)
+        if (fullDetails) {
+          testCasesWithDetails.push({
+            ...fullDetails,
+            order: tc.order, // Preserve order from test plan
+          })
+        } else {
+          // Fallback to basic data if we can't find full details
+          testCasesWithDetails.push({
+            ...tc,
+            description: tc.description || '',
+            labels: tc.labels || '',
+            epicLink: tc.epicLink || '',
+            platform: tc.platform || '',
+            regression: tc.regression || false,
+            linkedIssue: tc.linkedIssue || '',
+            data: tc.data || {},
+            createdBy: tc.createdBy || null,
+          })
+        }
+      }
+
+      // Prepare CSV data with headers
+      const headers = [
+        'prefix ID',
+        'title',
+        'description',
+        'labels',
+        'epic',
+        'test data',
+        'platform',
+        'priority',
+        'regression',
+        'epic link',
+        'linked issue',
+        'created by',
+        'data'
+      ]
+
+      const rows = testCasesWithDetails
+        .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+        .map((tc: any) => {
+          // Get prefix ID
+          const prefixId = tc.jiraKey || `${prefix}-${tc.id}`
+          
+          // Parse platform
+          let platformStr = ''
+          if (tc.platform) {
+            try {
+              const platforms = JSON.parse(tc.platform)
+              platformStr = Array.isArray(platforms) ? platforms.join(', ') : tc.platform
+            } catch {
+              platformStr = tc.platform
+            }
+          }
+
+          // Priority label
+          const priorityLabel = tc.priority === 1 ? 'Low' : tc.priority === 2 ? 'Medium' : tc.priority === 3 ? 'High' : 'Critical'
+
+          // Regression
+          const regression = tc.regression ? 'Yes' : 'No'
+
+          // Created by
+          const createdBy = tc.createdBy?.name || ''
+
+          // Data field - construct JSON with scenarios, precond_type, preconditions
+          let dataField = ''
+          if (tc.data) {
+            try {
+              const dataObj = typeof tc.data === 'string' ? JSON.parse(tc.data) : tc.data
+              const dataJson = {
+                scenarios: dataObj.bddScenarios || dataObj.scenarios || '',
+                precond_type: dataObj.precond_type || 'free_text',
+                preconditions: dataObj.preconditions || ''
+              }
+              dataField = JSON.stringify(dataJson)
+            } catch {
+              // If data is already a string or invalid, use as is
+              dataField = typeof tc.data === 'string' ? tc.data : JSON.stringify(tc.data || {})
+            }
+          }
+
+          return [
+            prefixId,
+            tc.title || '',
+            tc.description || '',
+            tc.labels || '',
+            tc.epicLink || '',
+            '', // test data - seems to be part of data field
+            platformStr,
+            priorityLabel,
+            regression,
+            tc.epicLink || '',
+            tc.linkedIssue || '',
+            createdBy,
+            dataField
+          ]
+        })
+
+      // Create CSV content
+      const csvContent = [
+        headers.join(','),
+        ...rows.map((row: any[]) => row.map(cell => {
+          const cellStr = String(cell || '')
+          // Escape quotes and wrap in quotes
+          return `"${cellStr.replace(/"/g, '""')}"`
+        }).join(','))
+      ].join('\n')
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const link = document.createElement('a')
+      const url = URL.createObjectURL(blob)
+      link.setAttribute('href', url)
+      link.setAttribute('download', `${testPlan.title.replace(/[^a-z0-9]/gi, '_')}_test_cases.csv`)
+      link.style.visibility = 'hidden'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      console.error('Download test plan error:', err)
+      alert('Failed to download test plan. Please try again.')
+    } finally {
+      setIsDownloadingTestPlan(null)
+    }
+  }
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    const validExtensions = ['.csv', '.tsv', '.tcv']
+    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
+    if (!validExtensions.includes(fileExtension)) {
+      setError('Invalid file type. Please select a CSV, TSV, or TCV file.')
+      return
+    }
+
+    try {
+      const text = await file.text()
+      const parsed = parseCSV(text)
+      setUploadedFile(file)
+      setParsedTestCases(parsed)
+      setError(null)
+    } catch (err: any) {
+      console.error('Parse CSV error:', err)
+      setError(err.message || 'Failed to parse CSV file. Please check the file format.')
+      setUploadedFile(null)
+      setParsedTestCases([])
+    }
+  }
+
+  const handleBulkImport = async (repoId: string, suiteId: string) => {
+    if (parsedTestCases.length === 0) return
+    
+    setIsUploading(true)
+    setUploadProgress({ current: 0, total: parsedTestCases.length })
+    setUploadResults({ success: 0, failed: 0, created: 0, updated: 0, errors: [] })
+    setError(null)
+    
+    // Check if suite exists, create it if it doesn't
+    let targetSuiteId = suiteId
+    try {
+      const suiteCheckResponse = await api.get(
+        `/projects/${projectId}/repositories/${repoId}/suites/${suiteId}`
+      )
+      if (!suiteCheckResponse.data?.data?.suite) {
+        // Suite doesn't exist, try to find it or create a new one
+        const suite = testSuitesForImport.find(s => s.id === suiteId)
+        if (suite) {
+          targetSuiteId = suite.id
+        } else {
+          // Create a new suite with a default name
+          try {
+            const createResponse = await api.post(
+              `/projects/${projectId}/repositories/${repoId}/suites`,
+              {
+                title: `Imported Suite ${new Date().toLocaleDateString()}`,
+                parentId: null,
+              }
+            )
+            if (createResponse.data?.data?.suite) {
+              targetSuiteId = createResponse.data.data.suite.id
+              // Refresh suites list
+              await fetchTestSuitesForImport(repoId)
+            }
+          } catch (createErr) {
+            console.error('Failed to create suite:', createErr)
+            setError('Failed to create test suite. Please create one manually.')
+            setIsUploading(false)
+            return
+          }
+        }
       }
     } catch (err: any) {
-      console.error('Fetch repositories error:', err)
-      // If endpoint doesn't exist yet, use empty array
+      // Suite might not exist (404), try to create it
       if (err.response?.status === 404) {
-        setRepositories([])
+        try {
+          const suite = testSuitesForImport.find(s => s.id === suiteId)
+          if (suite) {
+            // Suite exists in our list but API returned 404, use it anyway
+            targetSuiteId = suite.id
+          } else {
+            // Create a new suite
+            const createResponse = await api.post(
+              `/projects/${projectId}/repositories/${repoId}/suites`,
+              {
+                title: `Imported Suite ${new Date().toLocaleDateString()}`,
+                parentId: null,
+              }
+            )
+            if (createResponse.data?.data?.suite) {
+              targetSuiteId = createResponse.data.data.suite.id
+              // Refresh suites list
+              await fetchTestSuitesForImport(repoId)
+    }
+  }
+        } catch (createErr) {
+          console.error('Failed to create suite:', createErr)
+          setError('Test suite not found and failed to create a new one. Please create a test suite first.')
+          setIsUploading(false)
+          return
+        }
+      } else {
+        console.warn('Failed to check suite existence:', err)
+        // Continue anyway - might be a temporary error
       }
-    } finally {
-      setIsLoadingRepos(false)
     }
-  }
-
-  const formatTimeAgo = (dateString: string): string => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-
-    if (diffInSeconds < 60) {
-      return `${diffInSeconds} second${diffInSeconds !== 1 ? 's' : ''} ago`
-    } else if (diffInSeconds < 3600) {
-      const minutes = Math.floor(diffInSeconds / 60)
-      return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`
-    } else if (diffInSeconds < 86400) {
-      const hours = Math.floor(diffInSeconds / 3600)
-      return `${hours} hour${hours !== 1 ? 's' : ''} ago`
+    
+    // Fetch existing test cases to check for duplicates
+    let existingTestCases: any[] = []
+    try {
+      const existingResponse = await api.get(
+        `/projects/${projectId}/repositories/${repoId}/suites/${targetSuiteId}/test-cases?limit=1000&includeDeleted=false`
+      )
+      if (existingResponse.data?.data?.testCases) {
+        existingTestCases = existingResponse.data.data.testCases
+      }
+    } catch (err) {
+      console.warn('Failed to fetch existing test cases for duplicate check:', err)
+    }
+    
+    const titleToIdMap = new Map<string, string>()
+    existingTestCases.forEach(tc => {
+      if (tc.title) {
+        titleToIdMap.set(tc.title.toLowerCase().trim(), tc.id)
+      }
+    })
+    
+    const errors: string[] = []
+    let successCount = 0
+    let failedCount = 0
+    let createdCount = 0
+    let updatedCount = 0
+    
+    for (let i = 0; i < parsedTestCases.length; i++) {
+      const testCase = parsedTestCases[i]
+      setUploadProgress({ current: i + 1, total: parsedTestCases.length })
+      
+      try {
+        const normalizedTitle = testCase.title.toLowerCase().trim()
+        const existingId = titleToIdMap.get(normalizedTitle)
+        
+        const testCaseData = {
+          title: testCase.title,
+          description: testCase.description,
+          automated: testCase.automated,
+          priority: testCase.priority,
+          severity: testCase.severity,
+          labels: testCase.labels,
+          regression: testCase.regression,
+          epicLink: testCase.epicLink,
+          linkedIssue: testCase.linkedIssue,
+          releaseVersion: testCase.releaseVersion,
+          platform: testCase.platform,
+          data: testCase.data && Object.keys(testCase.data).length > 0 ? testCase.data : undefined,
+        }
+        
+        if (existingId) {
+          await api.patch(
+            `/projects/${projectId}/repositories/${repoId}/suites/${targetSuiteId}/test-cases/${existingId}`,
+            testCaseData
+          )
+          updatedCount++
+          successCount++
     } else {
-      const days = Math.floor(diffInSeconds / 86400)
-      return `${days} day${days !== 1 ? 's' : ''} ago`
+          await api.post(
+            `/projects/${projectId}/repositories/${repoId}/suites/${targetSuiteId}/test-cases`,
+            testCaseData
+          )
+          createdCount++
+          successCount++
+        }
+      } catch (err: any) {
+        failedCount++
+        let errorMsg = err.response?.data?.error?.message || 'Unknown error'
+        
+        if (err.response?.data?.error?.details) {
+          const details = err.response.data.error.details
+          if (Array.isArray(details)) {
+            const detailMessages = details.map((d: any) => `${d.path.join('.')}: ${d.message}`).join(', ')
+            errorMsg = `${errorMsg} (${detailMessages})`
+          }
+        }
+        
+        errors.push(`Row ${i + 1} (${testCase.title}): ${errorMsg}`)
+      }
     }
+    
+    setUploadResults({ success: successCount, failed: failedCount, created: createdCount, updated: updatedCount, errors })
+    setIsUploading(false)
+    
+    // Refresh repositories to update counts
+    refetchRepositories()
   }
+
+  const openTestCaseModal = async (testCase: any) => {
+    setIsTestCaseModalOpen(true)
+    setModalTestCaseId(testCase.id)
+    setModalTestCaseRepoId(testCase.repository.id)
+    setModalTestCaseSuiteId(testCase.suiteId || testCase.suite?.id)
+    setModalTestCaseRepository(testCase.repository ? repositories.find(r => r.id === testCase.repository.id) || null : null)
+    
+    await fetchTestCaseDetail(testCase.repository.id, testCase.suiteId || testCase.suite?.id, testCase.id)
+  }
+
+  const closeTestCaseModal = () => {
+    setIsTestCaseModalOpen(false)
+    setModalTestCaseId(null)
+    setModalTestCaseRepoId(null)
+    setModalTestCaseSuiteId(null)
+    setModalTestCaseRepository(null)
+    clearTestCase()
+  }
+
+  // Calculate project-level statistics from all repositories
+  const projectStats = {
+    totalTestCases: repositories.reduce((sum, repo) => sum + (repo.counts?.testCases || 0), 0),
+    automatedTestCases: repositories.reduce((sum, repo) => {
+      const total = repo.counts?.testCases || 0
+      const automation = repo.counts?.automation || 0
+      return sum + Math.round((total * automation) / 100)
+    }, 0),
+    manualTestCases: 0,
+    automationPercent: 0,
+  }
+  
+  projectStats.manualTestCases = projectStats.totalTestCases - projectStats.automatedTestCases
+  projectStats.automationPercent = projectStats.totalTestCases > 0
+    ? Math.round((projectStats.automatedTestCases / projectStats.totalTestCases) * 100)
+    : 0
 
   const getTabStats = (tab: TabType): number => {
     if (!project) return 0
@@ -146,20 +744,26 @@ export default function ViewProjectPage() {
       case 'testRuns':
         return project.counts.testRuns
       case 'testSuites':
+        return repositories.reduce((sum, repo) => sum + (repo.counts?.suites || 0), 0)
       case 'testCases':
+        return projectStats.totalTestCases
       case 'automation':
-        return 0 // TODO: Add these counts when API supports them
+        return projectStats.automationPercent
       default:
         return 0
     }
   }
 
-  const filteredRepositories = repositories.filter(repo =>
-    repo.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    repo.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const handleImportTestCases = (repo: Repository) => {
+    setSelectedRepoForImport(repo)
+    setShowImportTestCasesModal(true)
+    setUploadedFile(null)
+    setParsedTestCases([])
+    setUploadResults({ success: 0, failed: 0, created: 0, updated: 0, errors: [] })
+    fetchTestSuitesForImport(repo.id)
+      }
 
-  if (isLoading) {
+  if (isLoadingProject) {
     return (
       <div className="min-h-screen bg-gray-50">
         <AppHeader />
@@ -173,7 +777,7 @@ export default function ViewProjectPage() {
     )
   }
 
-  if (error || !project) {
+  if (projectError || !project) {
     return (
       <div className="min-h-screen bg-gray-50">
         <AppHeader />
@@ -185,7 +789,7 @@ export default function ViewProjectPage() {
               </svg>
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Error</h3>
-            <p className="text-gray-600 mb-6">{error || 'Project not found'}</p>
+            <p className="text-gray-600 mb-6">{projectError || 'Project not found'}</p>
             <Link
               href="/projects"
               className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium inline-block"
@@ -213,16 +817,47 @@ export default function ViewProjectPage() {
             <h1 className="text-lg font-medium text-gray-900">
               Dashboard of project: <span className="font-semibold">{project.title}</span>
             </h1>
-            <Link
-              href={`/projects/${projectId}/edit`}
-              className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              Settings
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/projects/${projectId}/edit`}
+                className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                title="Edit Project"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit
+              </Link>
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-700 border border-red-300 rounded-lg hover:bg-red-50 transition-colors font-medium"
+                title="Delete Project"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Project Statistics */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Project Statistics</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="flex items-center justify-between py-3 border-b border-gray-200 md:border-b-0 md:border-r border-gray-200 md:pr-4">
+              <span className="text-sm text-gray-600">Test Cases</span>
+              <span className="text-sm font-semibold text-gray-900">{projectStats.totalTestCases}</span>
+            </div>
+            <div className="flex items-center justify-between py-3 border-b border-gray-200 md:border-b-0 md:border-r border-gray-200 md:pr-4">
+              <span className="text-sm text-gray-600">Automated</span>
+              <span className="text-sm font-semibold text-green-600">{projectStats.automatedTestCases}</span>
+            </div>
+            <div className="flex items-center justify-between py-3">
+              <span className="text-sm text-gray-600">Manual</span>
+              <span className="text-sm font-semibold text-blue-600">{projectStats.manualTestCases}</span>
+            </div>
           </div>
         </div>
 
@@ -350,153 +985,187 @@ export default function ViewProjectPage() {
           </button>
         </div>
 
-        {/* Main Content Area - Squads Section */}
+        {/* Tab Content */}
         {activeTab === 'squads' && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            {/* Section Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-              <h2 className="text-2xl font-bold text-gray-900">Squads</h2>
-              <div className="flex items-center gap-4">
-                <Link
-                  href={`/projects/${projectId}/repositories/new`}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add New
-                </Link>
-                <div className="relative flex-1 sm:flex-initial sm:w-80">
-                  <input
-                    type="text"
-                    placeholder="Search repositories"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full px-4 py-2 pl-10 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition"
-                  />
-                  <svg
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
-              </div>
-            </div>
+          <SquadsTab
+            projectId={projectId}
+            repositories={repositories}
+            isLoading={isLoadingRepos}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            openRepoMenu={openRepoMenu}
+            onOpenRepoMenu={setOpenRepoMenu}
+            hoveredStat={hoveredStat}
+            onHoveredStatChange={setHoveredStat}
+            onImportTestCases={handleImportTestCases}
+            onDeleteRepository={(repo) => {
+              setRepoToDelete(repo)
+              setShowDeleteRepoModal(true)
+            }}
+          />
+        )}
 
-            {/* Squads List */}
-            {isLoadingRepos ? (
-              <div className="text-center py-12">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-                <p className="mt-4 text-gray-600">Loading squads...</p>
-              </div>
-            ) : filteredRepositories.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zM14 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1v-3z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Squads Found</h3>
-                <p className="text-gray-600 mb-4">
-                  {searchQuery ? 'No squads match your search.' : 'Create your first squad to get started.'}
-                </p>
-                {!searchQuery && (
-                  <Link
-                    href={`/projects/${projectId}/repositories/new`}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium inline-block"
-                  >
-                    Add New Squad
-                  </Link>
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredRepositories.map((repo) => (
-                  <Link
-                    key={repo.id}
-                    href={`/projects/${projectId}/repository/${repo.id}`}
-                    className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white flex flex-col cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-8 h-8 rounded-lg bg-primary-100 flex items-center justify-center flex-shrink-0">
-                        <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zM14 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1v-3z" />
-                        </svg>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-base font-semibold text-gray-900 truncate">{repo.title}</h3>
-                        <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{repo.description || 'No description'}</p>
-                      </div>
-                    </div>
+        {activeTab === 'testPlans' && (
+          <TestPlansTab
+            projectId={projectId}
+            testPlans={testPlans}
+            isLoading={isLoadingTestPlans}
+            pagination={testPlansPagination}
+            onPaginationChange={setTestPlansPagination}
+            openTestPlanMenu={openTestPlanMenu}
+            onOpenTestPlanMenu={setOpenTestPlanMenu}
+            isDownloadingTestPlan={isDownloadingTestPlan}
+            onViewTestPlan={(testPlan) => {
+              router.push(`/projects/${projectId}/repositories/${testPlan.repository.id}/test-plans/${testPlan.id}`)
+                              }}
+            onDownloadTestPlan={handleDownloadTestPlan}
+            onDeleteTestPlan={(testPlan) => {
+              setTestPlanToDelete(testPlan)
+              setShowDeleteTestPlanModal(true)
+                              }}
+          />
+        )}
 
-                    {/* Automation Coverage */}
-                    <div className="mb-3">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-medium text-gray-700">Automation Coverage</span>
-                        <span className="text-xs text-gray-600">{repo.counts?.automation || 0}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-1.5">
-                        <div
-                          className={`h-1.5 rounded-full transition-all ${
-                            (repo.counts?.automation || 0) > 0 ? 'bg-red-500' : 'bg-green-500'
-                          }`}
-                          style={{ width: `${repo.counts?.automation || 0}%` }}
-                        ></div>
-                      </div>
-                    </div>
+        {activeTab === 'testSuites' && (
+          <TestSuitesTab
+            projectId={projectId}
+            testSuites={allTestSuites}
+            isLoading={isLoadingAllTestSuites}
+            pagination={allTestSuitesPagination}
+            onPaginationChange={setAllTestSuitesPagination}
+          />
+        )}
 
-                    {/* Statistics */}
-                    <div className="flex items-center gap-4 mb-3">
-                      <div className="flex items-center gap-1.5 text-gray-600">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <span className="text-xs font-medium">{repo.counts?.suites || 0}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-gray-600">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                        </svg>
-                        <span className="text-xs font-medium">{repo.counts?.testCases || 0}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-gray-600">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                        <span className="text-xs font-medium">{repo.counts?.automation || 0}</span>
-                      </div>
-                    </div>
+        {activeTab === 'testCases' && (
+          <TestCasesTab
+            testCases={allTestCases}
+            isLoading={isLoadingAllTestCases}
+            pagination={testCasesPagination}
+            onPaginationChange={setTestCasesPagination}
+            onTestCaseClick={openTestCaseModal}
+          />
+        )}
 
-                    {/* Last Updated */}
-                    <div className="text-xs text-gray-500 mt-auto">
-                      {formatTimeAgo(repo.updatedAt)}
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
+        {activeTab === 'automation' && (
+          <AutomationTab
+            testCases={automatedTestCases}
+            isLoading={isLoadingAutomatedTestCases}
+            pagination={automatedTestCasesPagination}
+            onPaginationChange={setAutomatedTestCasesPagination}
+            onTestCaseClick={openTestCaseModal}
+          />
+                          )}
+
+        {activeTab === 'testRuns' && (
+          <TestRunsTab
+            projectId={projectId}
+            testRuns={testRuns}
+            isLoading={isLoadingTestRuns}
+            pagination={testRunsPagination}
+            onPaginationChange={setTestRunsPagination}
+            openTestRunMenu={openTestRunMenu}
+            onOpenTestRunMenu={setOpenTestRunMenu}
+            onDeleteTestRun={(testRun) => {
+              setTestRunToDelete(testRun)
+              setShowDeleteTestRunModal(true)
+            }}
+          />
         )}
 
         {/* Placeholder for other tabs */}
-        {activeTab !== 'squads' && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
-            <div className="text-gray-400 mb-4">
-              <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Coming Soon</h3>
-            <p className="text-gray-600">
-              The {activeTab === 'testSuites' ? 'Test Suites' : activeTab === 'testCases' ? 'Test Cases' : activeTab === 'automation' ? 'Automation' : activeTab === 'testPlans' ? 'Test Plans' : 'Test Runs'} section is under development.
-            </p>
-          </div>
+        {activeTab !== 'squads' && activeTab !== 'testPlans' && activeTab !== 'testSuites' && activeTab !== 'testCases' && activeTab !== 'automation' && activeTab !== 'testRuns' && (
+          <ComingSoonPlaceholder
+            message="This section is under development."
+          />
         )}
       </main>
+
+      {/* Modals */}
+      <DeleteProjectModal
+        isOpen={showDeleteModal}
+        onClose={() => {
+                    setShowDeleteModal(false)
+                    setError(null)
+                  }}
+        onConfirm={handleDeleteProject}
+        project={project}
+        isDeleting={isDeleting}
+        error={error}
+      />
+
+      <DeleteRepositoryModal
+        isOpen={showDeleteRepoModal}
+        onClose={() => {
+                    setShowDeleteRepoModal(false)
+                    setRepoToDelete(null)
+                    setError(null)
+                  }}
+        onConfirm={handleDeleteRepository}
+        repository={repoToDelete}
+        isDeleting={isDeletingRepo}
+        error={error}
+      />
+
+      <DeleteTestPlanModal
+        isOpen={showDeleteTestPlanModal}
+        onClose={() => {
+          setShowDeleteTestPlanModal(false)
+          setTestPlanToDelete(null)
+          setError(null)
+        }}
+        onConfirm={handleDeleteTestPlan}
+        testPlan={testPlanToDelete}
+        isDeleting={isDeletingTestPlan}
+        error={error}
+      />
+
+      <DeleteTestRunModal
+        isOpen={showDeleteTestRunModal}
+        onClose={() => {
+          setShowDeleteTestRunModal(false)
+          setTestRunToDelete(null)
+          setError(null)
+        }}
+        onConfirm={handleDeleteTestRun}
+        testRun={testRunToDelete}
+        isDeleting={isDeletingTestRun}
+        error={error}
+      />
+
+      <ImportTestCasesModal
+        isOpen={showImportTestCasesModal}
+        onClose={() => {
+          setShowImportTestCasesModal(false)
+          setSelectedRepoForImport(null)
+          setUploadedFile(null)
+          setParsedTestCases([])
+          setUploadResults({ success: 0, failed: 0, created: 0, updated: 0, errors: [] })
+          if (fileInputRef.current) {
+            fileInputRef.current.value = ''
+          }
+        }}
+        projectId={projectId}
+        repository={selectedRepoForImport}
+        uploadedFile={uploadedFile}
+        parsedTestCases={parsedTestCases}
+        isUploading={isUploading}
+        uploadProgress={uploadProgress}
+        uploadResults={uploadResults}
+        error={error}
+        testSuites={testSuitesForImport}
+        isLoadingSuites={isLoadingSuites}
+        fileInputRef={fileInputRef}
+        onFileSelect={handleFileSelect}
+        onBulkImport={handleBulkImport}
+      />
+
+      <TestCaseDetailModal
+        isOpen={isTestCaseModalOpen}
+        onClose={closeTestCaseModal}
+        isLoading={isLoadingModalTestCase}
+        testCase={modalTestCaseData as any}
+        repository={modalTestCaseRepository}
+      />
     </div>
   )
 }

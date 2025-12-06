@@ -1,4 +1,5 @@
-import express from 'express';
+import express from 'express'
+import { testRunWorker, exportWorker, scheduledRunWorker } from './queue/workers';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -56,12 +57,21 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Disable ETag caching for API routes (prevents 304 responses)
+app.use(`/api/${API_VERSION}`, (_req, res, next) => {
+  res.set('ETag', '');
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 // Serve static files (avatars, uploads)
 const uploadDir = process.env.UPLOAD_DIR || 'uploads';
 app.use('/uploads', express.static(uploadDir));
 
 // Root endpoint - API information
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.json({
     message: 'QaHub API Server',
     version: API_VERSION,
@@ -76,7 +86,7 @@ app.get('/', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', async (req, res) => {
+app.get('/health', async (_req, res) => {
   const dbConnected = await checkDatabaseConnection();
   
   res.status(dbConnected ? 200 : 503).json({
@@ -109,7 +119,7 @@ import documentEngagementRoutes from './api/routes/document-engagements';
 import documentTemplateRoutes from './api/routes/document-templates';
 import editorImageRoutes from './api/routes/editor-images';
 
-app.get(`/api/${API_VERSION}`, (req, res) => {
+app.get(`/api/${API_VERSION}`, (_req, res) => {
   res.json({
     message: 'QaHub API',
     version: API_VERSION,
@@ -286,7 +296,7 @@ app.use(`/api/${API_VERSION}`, documentTemplateRoutes);
 app.use(`/api/${API_VERSION}`, editorImageRoutes);
 
 // 404 handler
-app.use((req, res) => {
+app.use((_req, res) => {
   res.status(404).json({
     error: {
       code: 'NOT_FOUND',
@@ -296,7 +306,7 @@ app.use((req, res) => {
 });
 
 // Error handler
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error('Unhandled error:', err);
   
   res.status(500).json({

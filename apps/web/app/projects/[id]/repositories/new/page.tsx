@@ -79,12 +79,11 @@ export default function CreateRepositoryPage() {
     setError(null)
 
     try {
-      // TODO: Replace with actual API endpoint when available
-      // For now, this is a placeholder
       const response = await api.post(`/projects/${projectId}/repositories`, {
         title: formData.title.trim(),
         prefix: formData.prefix.trim(),
         description: formData.description.trim() || undefined,
+        repositoryStructure: formData.repositoryStructure,
       })
 
       if (response.data?.data?.repository) {

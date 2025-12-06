@@ -386,7 +386,7 @@ router.post('/documents/:documentId/comments', authenticateToken, async (req, re
         parentId: data.parentId ? BigInt(data.parentId) : null,
         content: data.content.trim(),
         commentType: data.commentType || 'general',
-        mentionedUserIds: data.mentionedUserIds || null,
+        mentionedUserIds: data.mentionedUserIds || undefined,
       },
       include: {
         parent: {

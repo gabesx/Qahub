@@ -749,7 +749,7 @@ test: add integration tests for multi-tenancy
 
 ---
 
-**Last Updated**: 2024
+**Last Updated**: 2025
 **Version**: 1.0.0
 **Maintainer**: Development Team
 

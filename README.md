@@ -459,7 +459,7 @@ For issues and questions, please open an issue on the repository.
 
 ---
 
-**Built with ❤️ using Node.js, TypeScript, PostgreSQL, and Prisma**
+**Built with ❤️ using Node.js, TypeScript, PostgreSQL, and Prisma by gabe.sx**
 
 Email: admin@qahub.com
 Password: admin123

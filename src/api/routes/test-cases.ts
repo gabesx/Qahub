@@ -916,6 +916,191 @@ router.delete('/projects/:projectId/repositories/:repoId/suites/:suiteId/test-ca
   }
 });
 
+// Move test case to different suite
+router.post('/projects/:projectId/repositories/:repoId/test-cases/:testCaseId/move', authenticateToken, async (req, res) => {
+  try {
+    const userId = BigInt((req as AuthRequest).user!.userId);
+    const tenantId = await getUserPrimaryTenant(userId);
+    const projectId = BigInt(req.params.projectId);
+    const repoId = BigInt(req.params.repoId);
+    const testCaseId = BigInt(req.params.testCaseId);
+
+    if (!tenantId) {
+      return res.status(403).json({
+        error: {
+          code: 'NO_TENANT',
+          message: 'You must belong to a tenant to move test cases',
+        },
+      });
+    }
+
+    const moveSchema = z.object({
+      targetSuiteId: z.string().min(1, 'Target suite ID is required'),
+    });
+
+    const { targetSuiteId } = moveSchema.parse(req.body);
+    const targetSuiteIdBigInt = BigInt(targetSuiteId);
+
+    // Verify repository exists and belongs to tenant
+    const repository = await prisma.repository.findFirst({
+      where: {
+        id: repoId,
+        projectId,
+        tenantId,
+      },
+    });
+
+    if (!repository) {
+      return res.status(404).json({
+        error: {
+          code: 'REPOSITORY_NOT_FOUND',
+          message: 'Repository not found',
+        },
+      });
+    }
+
+    // Verify target suite exists and belongs to repository
+    const targetSuite = await prisma.suite.findFirst({
+      where: {
+        id: targetSuiteIdBigInt,
+        repositoryId: repoId,
+      },
+    });
+
+    if (!targetSuite) {
+      return res.status(404).json({
+        error: {
+          code: 'TARGET_SUITE_NOT_FOUND',
+          message: 'Target test suite not found',
+        },
+      });
+    }
+
+    // Get the test case (from any suite in this repository)
+    const testCase = await prisma.testCase.findFirst({
+      where: {
+        id: testCaseId,
+        tenantId,
+        suite: {
+          repositoryId: repoId,
+        },
+      },
+      include: {
+        suite: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+    });
+
+    if (!testCase) {
+      return res.status(404).json({
+        error: {
+          code: 'TEST_CASE_NOT_FOUND',
+          message: 'Test case not found',
+        },
+      });
+    }
+
+    // Check if already in target suite
+    if (testCase.suiteId.toString() === targetSuiteId) {
+      return res.status(400).json({
+        error: {
+          code: 'ALREADY_IN_SUITE',
+          message: 'Test case is already in the target suite',
+        },
+      });
+    }
+
+    // Check if test case is soft-deleted
+    if (testCase.deletedAt) {
+      return res.status(410).json({
+        error: {
+          code: 'TEST_CASE_DELETED',
+          message: 'Cannot move a deleted test case',
+        },
+      });
+    }
+
+    // Move the test case
+    const updated = await prisma.testCase.update({
+      where: { id: testCaseId },
+      data: {
+        suiteId: targetSuiteIdBigInt,
+        updatedBy: userId,
+        version: testCase.version + 1,
+      },
+      include: {
+        suite: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+    });
+
+    // Create audit log
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'moved',
+          modelType: 'test_case',
+          modelId: testCaseId,
+          oldValues: {
+            suiteId: testCase.suite.id.toString(),
+            suiteTitle: testCase.suite.title,
+          },
+          newValues: {
+            suiteId: updated.suite.id.toString(),
+            suiteTitle: updated.suite.title,
+          },
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get('user-agent') || null,
+        },
+      });
+    } catch (auditError) {
+      logger.warn('Failed to create audit log:', auditError);
+    }
+
+    logger.info(`Test case moved: ${testCase.title} from suite ${testCase.suite.id} to suite ${targetSuiteId} by user ${userId}`);
+
+    res.json({
+      message: 'Test case moved successfully',
+      data: {
+        testCase: {
+          id: updated.id.toString(),
+          suiteId: updated.suiteId.toString(),
+          suite: {
+            id: updated.suite.id.toString(),
+            title: updated.suite.title,
+          },
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid input data',
+          details: error.errors,
+        },
+      });
+    }
+    logger.error('Move test case error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while moving test case',
+      },
+    });
+  }
+});
+
 // Restore soft-deleted test case
 router.post('/projects/:projectId/repositories/:repoId/suites/:suiteId/test-cases/:testCaseId/restore', authenticateToken, async (req, res) => {
   try {
